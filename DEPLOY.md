@@ -71,10 +71,14 @@ supabase functions deploy stripe-checkout stripe-portal creneau-checkout \
   invite-athlete accept-invite video-url \
   device-connect device-sync device-disconnect
 
-# Functions appelées par un tiers (pas de JWT) :
-supabase functions deploy stripe-webhook        --no-verify-jwt
-supabase functions deploy strava-oauth-callback --no-verify-jwt
-supabase functions deploy strava-webhook        --no-verify-jwt
+# Functions appelées par un tiers (pas de JWT : callbacks OAuth + webhooks) :
+supabase functions deploy stripe-webhook         --no-verify-jwt
+supabase functions deploy strava-oauth-callback  --no-verify-jwt
+supabase functions deploy strava-webhook         --no-verify-jwt
+supabase functions deploy coros-oauth-callback   --no-verify-jwt
+supabase functions deploy coros-webhook          --no-verify-jwt
+supabase functions deploy garmin-oauth-callback  --no-verify-jwt
+supabase functions deploy garmin-webhook         --no-verify-jwt
 ```
 
 ## 8. Souscrire au webhook Strava (push automatique des activités)
@@ -100,14 +104,26 @@ retour appli → **Synchroniser** → tes vraies activités apparaissent.
 ---
 
 ## Garmin / Coros (pour les rendez-vous d'homologation)
-Le code est branché de façon générique (`device-connect` + `_shared/providers.ts`)
-mais leurs APIs exigent une **validation partenaire** avant d'avoir des clés :
-- **Garmin** : *Garmin Connect Developer Program* (Health/Activity API, OAuth1.0a).
-- **Coros** : *COROS Open API* (OAuth2).
+Les **flux complets sont codés** (`device-connect` + `_shared/coros.ts` /
+`_shared/garmin.ts` + callbacks + webhooks). Il ne manque que les **clés
+partenaire** (self-service impossible, contrairement à Strava) :
+- **Garmin** : *Garmin Connect Developer Program* (Health/Activity API, **OAuth 1.0a**,
+  signeur HMAC-SHA1 validé par test). Callback domain à régler = ton domaine
+  functions. Webhook (push/ping) → `…/functions/v1/garmin-webhook`.
+  `GARMIN_CONSUMER_KEY` / `GARMIN_CONSUMER_SECRET`.
+- **Coros** : *COROS Open API* (**OAuth2**). Redirect URI =
+  `…/functions/v1/coros-oauth-callback`. Data subscription → `…/coros-webhook`.
+  `COROS_CLIENT_ID` / `COROS_CLIENT_SECRET`.
 
-Tant que `GARMIN_*` / `COROS_*` sont vides, les boutons renvoient un message
+Tant que `GARMIN_*` / `COROS_*` sont vides, les boutons Garmin/Coros renvoient
 « intégration en cours d'homologation » — sans casser la démo. Dès réception des
-clés : renseigne-les, je finalise le mapping d'activités spécifique (1 fonction).
+clés : renseigne-les et déploie ; il restera à **ajuster les noms de champs
+d'activité** au format réel de chaque API (les normaliseurs sont défensifs et
+conservent le payload brut dans `external_activities.raw`).
+
+> Les endpoints exacts de liste d'activités Coros et le format des push
+> Garmin/Coros peuvent varier selon la version d'API attribuée : à confirmer
+> avec leur doc une fois l'accès obtenu (constantes isolées en haut des fichiers).
 
 > Argumentaire homologation : montre la démo Strava live + ce dépôt
 > (`device_connections`, normalisation `external_activities`, webhooks) comme
@@ -121,8 +137,12 @@ clés : renseigne-les, je finalise le mapping d'activités spécifique (1 foncti
 | creneau-checkout | ✅ | paiement créneau Hyrox |
 | invite-athlete / accept-invite | ✅ | invitations coach→athlète (+email Resend) |
 | video-url | ✅ | URL signée vidéo premium |
-| device-connect | ✅ | démarre l'OAuth (Strava/…); renvoie l'URL |
+| device-connect | ✅ | démarre l'OAuth (Strava/Coros/Garmin); renvoie l'URL |
 | strava-oauth-callback | ❌ | retour OAuth Strava → stocke jetons + import |
 | strava-webhook | ❌ | push d'activités Strava |
-| device-sync | ✅ | import manuel des activités |
+| coros-oauth-callback | ❌ | retour OAuth2 Coros → jetons + import |
+| coros-webhook | ❌ | data subscription Coros |
+| garmin-oauth-callback | ❌ | retour OAuth1.0a Garmin → jetons + import |
+| garmin-webhook | ❌ | push/ping d'activités Garmin |
+| device-sync | ✅ | import manuel (Strava/Coros/Garmin) |
 | device-disconnect | ✅ | délie un compte + révoque le jeton |

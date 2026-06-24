@@ -175,8 +175,13 @@ un template coach, et le club « Muret Goat Squad » (groupes + membres + créne
       (`device_connections` / `external_activities` / `oauth_states` / vue
       `my_devices`), edge functions `device-connect` / `strava-oauth-callback` /
       `strava-webhook` / `device-sync` / `device-disconnect` (+ `_shared/providers.ts`).
-      **Strava complet**, **Garmin/Coros** branchés (en attente clés partenaire).
-      UI Strava de l'app reliée au vrai OAuth (repli démo). Voir **`DEPLOY.md`**.
+      **Strava complet**. UI de l'app reliée au vrai OAuth (repli démo).
+- [x] **Coros** (OAuth2) et **Garmin** (OAuth1.0a) entièrement codés :
+      `_shared/coros.ts` / `_shared/garmin.ts` / `_shared/oauth1.ts` (signeur
+      HMAC-SHA1 testé, `test/oauth1.test.mjs`), callbacks + webhooks dédiés.
+      Boutons Garmin/Coros dans l'app + écran « Activités synchronisées »
+      multi-source. En attente des **clés partenaire** pour activation.
 - [ ] Uploader les **vidéos** dans le bucket `videos` et renseigner `videos.src`.
 - [ ] Affiner la RLS (membres club avec compte, rôles coach dans un club).
-- [ ] Finaliser le mapping d'activités **Garmin/Coros** une fois les clés reçues.
+- [ ] À réception des clés Garmin/Coros : **ajuster les noms de champs**
+      d'activité au format réel de chaque API (normaliseurs déjà défensifs).

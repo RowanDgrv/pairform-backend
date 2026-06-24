@@ -28,6 +28,7 @@ create table if not exists device_connections (
   provider_user_id text,                       -- id de l'athlète chez la plateforme
   access_token     text,
   refresh_token    text,
+  token_secret     text,                        -- OAuth1.0a (Garmin) : secret du jeton d'accès
   expires_at       timestamptz,                -- expiration de l'access_token
   scope            text,
   last_sync_at     timestamptz,
@@ -67,9 +68,10 @@ create index if not exists idx_extact_user_time on external_activities(user_id, 
 --  qui a lancé la connexion. Écrit/lu uniquement par les edge functions.
 -- ---------------------------------------------------------------------------
 create table if not exists oauth_states (
-  state      text primary key,
+  state      text primary key,                 -- aléatoire (OAuth2) ou request token (Garmin OAuth1)
   user_id    uuid not null references profiles(id) on delete cascade,
   provider   device_provider not null,
+  meta       jsonb,                             -- ex: { req_secret } pour OAuth1.0a
   created_at timestamptz not null default now()
 );
 alter table oauth_states enable row level security;  -- aucune policy → service_role only

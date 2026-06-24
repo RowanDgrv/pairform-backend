@@ -75,9 +75,10 @@ export const OAUTH: Record<string, OAuthConfig> = {
     clientId: () => Deno.env.get("GARMIN_CONSUMER_KEY"),
     clientSecret: () => Deno.env.get("GARMIN_CONSUMER_SECRET"),
   },
-  // COROS Open API : OAuth2 — branché après accès partenaire.
+  // COROS Open API : OAuth2 (mêmes mécaniques que Strava). S'active dès que
+  // COROS_CLIENT_ID est présent (clés via le COROS Open API partner program).
   coros: {
-    ready: false,
+    ready: true,
     authorizeUrl: "https://open.coros.com/oauth2/authorize",
     tokenUrl: "https://open.coros.com/oauth2/accesstoken",
     scope: "",
