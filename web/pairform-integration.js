@@ -158,7 +158,12 @@ function injectStyles() {
   .dev-more{display:flex;gap:8px;margin-top:8px}
   .dev-mini{flex:1;padding:8px 0;border:1px solid #2a2f37;border-radius:9px;background:#0c0f13;
     color:#cfd6de;font-size:12.5px;font-weight:600;cursor:pointer}
-  .dev-mini:hover{border-color:#46C2D8;color:#46C2D8}`;
+  .dev-mini:hover{border-color:#46C2D8;color:#46C2D8}
+  .demo-pick{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:10px 0 4px}
+  .dp-lbl{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#8a949e;margin-right:2px}
+  .dp-chip{padding:5px 10px;border:1px solid #2a2f37;border-radius:99px;background:#0c0f13;
+    color:#cfd6de;font-size:12px;font-weight:600;cursor:pointer}
+  .dp-chip.on{border-color:#46C2D8;color:#46C2D8;background:rgba(70,194,216,.10)}`;
   const st = document.createElement("style");
   st.id = "pf-auth-style"; st.textContent = css;
   document.head.appendChild(st);
