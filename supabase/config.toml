@@ -1,0 +1,24 @@
+project_id = "pairform"
+
+[functions.stripe-checkout]
+verify_jwt = true
+
+[functions.stripe-portal]
+verify_jwt = true
+
+# Stripe ne fournit pas de JWT Supabase : il signe avec STRIPE_WEBHOOK_SECRET.
+# On désactive donc la vérif JWT pour ce endpoint (la sécurité = la signature Stripe).
+[functions.stripe-webhook]
+verify_jwt = false
+
+[functions.invite-athlete]
+verify_jwt = true
+
+[functions.accept-invite]
+verify_jwt = true
+
+[functions.creneau-checkout]
+verify_jwt = true
+
+[functions.video-url]
+verify_jwt = true
