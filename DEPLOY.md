@@ -79,7 +79,7 @@ supabase secrets set --env-file ./.env
 
 # Functions protégées par JWT (défaut) :
 supabase functions deploy stripe-checkout stripe-portal creneau-checkout \
-  club-subscribe club-connect \
+  club-subscribe club-connect coach-connect \
   invite-athlete accept-invite video-url \
   device-connect device-sync device-disconnect
 
@@ -149,6 +149,7 @@ conservent le payload brut dans `external_activities.raw`).
 | creneau-checkout | ✅ | paiement créneau Hyrox (formule « À la séance ») |
 | club-subscribe | ✅ | abonnement membre→formule club (sub/coach), Connect + fallback |
 | club-connect | ✅ | onboarding Stripe Connect (compte Express) du club |
+| coach-connect | ✅ | onboarding Stripe Connect (compte Express) du coach solo |
 | invite-athlete / accept-invite | ✅ | invitations coach→athlète (+email Resend) |
 | video-url | ✅ | URL signée vidéo premium |
 | device-connect | ✅ | démarre l'OAuth (Strava/Coros/Garmin); renvoie l'URL |

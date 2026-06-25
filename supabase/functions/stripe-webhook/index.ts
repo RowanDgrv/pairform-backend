@@ -64,13 +64,17 @@ Deno.serve(async (req) => {
         }
         break;
       }
-      // Connect : le club a (dé)complété son onboarding → MAJ charges_enabled.
+      // Connect : un club OU un coach a (dé)complété son onboarding.
+      // On met à jour les deux tables ; celle qui ne correspond pas touche 0 ligne.
       case "account.updated": {
         const acct = event.data.object as Stripe.Account;
-        const { error } = await supabase.from("clubs")
-          .update({ charges_enabled: acct.charges_enabled ?? false })
-          .eq("stripe_account_id", acct.id);
-        if (error) console.error("MAJ charges_enabled échouée :", error);
+        const enabled = acct.charges_enabled ?? false;
+        const r1 = await supabase.from("clubs")
+          .update({ charges_enabled: enabled }).eq("stripe_account_id", acct.id);
+        const r2 = await supabase.from("profiles")
+          .update({ charges_enabled: enabled }).eq("stripe_account_id", acct.id);
+        if (r1.error) console.error("MAJ charges_enabled club échouée :", r1.error);
+        if (r2.error) console.error("MAJ charges_enabled coach échouée :", r2.error);
         break;
       }
       default:

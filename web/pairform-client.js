@@ -83,6 +83,11 @@ export const PF = {
     const sub = await this.mySubscription();
     return !!sub && ["active", "trialing"].includes(sub.status);
   },
+  // Démarre l'onboarding Stripe Connect du COACH (pour facturer ses athlètes).
+  async connectCoachStripe() {
+    const { url } = await this._invoke("coach-connect", {});
+    window.location.href = url;
+  },
 
   // -------- DONNÉES ATHLÈTE --------
   async getAthleteRefs() {
