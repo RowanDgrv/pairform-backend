@@ -29,7 +29,7 @@ brew install stripe/stripe-cli/stripe
 
 ## 2. Pousser le schéma (14 + tables device-sync)
 ```bash
-supabase db push           # applique migrations/0001 … 0006
+supabase db push           # applique migrations/0001 … 0008
 ```
 > Vérifie dans Supabase → Table Editor que `device_connections`,
 > `external_activities`, `oauth_states` et la vue `my_devices` existent.
@@ -79,7 +79,7 @@ supabase secrets set --env-file ./.env
 
 # Functions protégées par JWT (défaut) :
 supabase functions deploy stripe-checkout stripe-portal creneau-checkout \
-  club-subscribe club-connect coach-connect \
+  club-subscribe club-connect coach-connect coach-subscribe \
   invite-athlete accept-invite video-url \
   device-connect device-sync device-disconnect
 
@@ -150,6 +150,7 @@ conservent le payload brut dans `external_activities.raw`).
 | club-subscribe | ✅ | abonnement membre→formule club (sub/coach), Connect + fallback |
 | club-connect | ✅ | onboarding Stripe Connect (compte Express) du club |
 | coach-connect | ✅ | onboarding Stripe Connect (compte Express) du coach solo |
+| coach-subscribe | ✅ | abonnement athlète→coach (suivi récurrent), Connect + fallback |
 | invite-athlete / accept-invite | ✅ | invitations coach→athlète (+email Resend) |
 | video-url | ✅ | URL signée vidéo premium |
 | device-connect | ✅ | démarre l'OAuth (Strava/Coros/Garmin); renvoie l'URL |

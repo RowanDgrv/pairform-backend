@@ -80,6 +80,11 @@ begin
     (v_club, 'coach',  119, 'month')
   on conflict (club_id, tier) do nothing;
 
+  -- Offre de coaching du compte démo (99 €/mois) — cf. 0008_coach_offers.
+  insert into coach_offers (coach_id, name, price)
+  select p_user, 'Suivi coaching', 99
+  where not exists (select 1 from coach_offers where coach_id = p_user);
+
   return 'Données démo créées pour ' || p_user || ' (club: ' || v_club || ').';
 end $$;
 

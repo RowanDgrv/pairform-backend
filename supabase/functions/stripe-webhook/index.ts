@@ -96,6 +96,10 @@ async function upsertSubscription(sub: Stripe.Subscription) {
   if (sub.metadata?.kind === "club_membership") {
     return await upsertClubMembership(sub);
   }
+  // Un abonnement au suivi d'un coach est routé vers sa propre table.
+  if (sub.metadata?.kind === "coaching_subscription") {
+    return await upsertCoachingSubscription(sub);
+  }
 
   const userId = sub.metadata?.supabase_user_id;
   const plan = sub.metadata?.plan ?? "athlete";
@@ -150,6 +154,35 @@ async function upsertClubMembership(sub: Stripe.Subscription) {
     .upsert(row, { onConflict: "stripe_subscription_id" });
 
   if (error) console.error("Upsert club_membership échoué :", error);
+}
+
+// Abonnement d'un athlète au suivi d'un coach. Métadonnées posées par
+// coach-subscribe : { kind, coach_id, athlete_id, offer_id }.
+async function upsertCoachingSubscription(sub: Stripe.Subscription) {
+  const m = sub.metadata ?? {};
+  if (!m.coach_id || !m.athlete_id) {
+    console.warn("Abonnement coaching sans coach_id/athlete_id :", sub.id);
+    return;
+  }
+
+  const row = {
+    coach_id: m.coach_id,
+    athlete_id: m.athlete_id,
+    offer_id: m.offer_id || null,
+    status: sub.status,
+    stripe_customer_id: sub.customer as string,
+    stripe_subscription_id: sub.id,
+    price_id: sub.items.data[0]?.price?.id ?? null,
+    current_period_end: new Date(sub.current_period_end * 1000).toISOString(),
+    cancel_at_period_end: sub.cancel_at_period_end,
+    updated_at: new Date().toISOString(),
+  };
+
+  const { error } = await supabase
+    .from("coaching_subscriptions")
+    .upsert(row, { onConflict: "stripe_subscription_id" });
+
+  if (error) console.error("Upsert coaching_subscription échoué :", error);
 }
 
 // Confirme le paiement d'un créneau à la carte : marque le paiement 'paid'

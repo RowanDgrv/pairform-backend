@@ -88,6 +88,37 @@ export const PF = {
     const { url } = await this._invoke("coach-connect", {});
     window.location.href = url;
   },
+  // Offre(s) de coaching d'un coach (par défaut : le coach connecté).
+  async getCoachOffers(coachId = this.user.id) {
+    const { data } = await sb.from("coach_offers").select("*").eq("coach_id", coachId);
+    return data ?? [];
+  },
+  // Crée (sans id) ou met à jour (avec id) une offre de coaching. Coach only.
+  async saveCoachOffer({ id, name = "Suivi coaching", price }) {
+    const row = { coach_id: this.user.id, name, price };
+    if (id) row.id = id;
+    const { data, error } = await sb.from("coach_offers").upsert(row).select().single();
+    if (error) throw error; return data;
+  },
+  // L'athlète s'abonne au suivi de son coach → redirige Stripe.
+  // coachId optionnel : si absent, on résout le coach actif de l'athlète.
+  async subscribeToCoach(coachId = null, offerId = null) {
+    if (!coachId) {
+      const { data } = await sb.from("coach_athlete")
+        .select("coach_id").eq("athlete_id", this.user.id).eq("status", "active").limit(1).maybeSingle();
+      coachId = data?.coach_id;
+      if (!coachId) throw new Error("Aucun coach actif pour cet athlète");
+    }
+    const body = { coach_id: coachId };
+    if (offerId) body.offer_id = offerId;
+    const { url } = await this._invoke("coach-subscribe", body);
+    window.location.href = url;
+  },
+  // Abonnements de coaching (coach : les siens ; athlète : les siens — via RLS).
+  async getCoachingSubscriptions() {
+    const { data } = await sb.from("coaching_subscriptions").select("*");
+    return data ?? [];
+  },
 
   // -------- DONNÉES ATHLÈTE --------
   async getAthleteRefs() {
