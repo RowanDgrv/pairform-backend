@@ -146,7 +146,9 @@ conservent le payload brut dans `external_activities.raw`).
 |---|---|---|
 | stripe-checkout / stripe-portal | ✅ | abonnements |
 | stripe-webhook | ❌ | source de vérité abonnements |
-| creneau-checkout | ✅ | paiement créneau Hyrox |
+| creneau-checkout | ✅ | paiement créneau Hyrox (formule « À la séance ») |
+| club-subscribe | ✅ | abonnement membre→formule club (sub/coach), Connect + fallback |
+| club-connect | ✅ | onboarding Stripe Connect (compte Express) du club |
 | invite-athlete / accept-invite | ✅ | invitations coach→athlète (+email Resend) |
 | video-url | ✅ | URL signée vidéo premium |
 | device-connect | ✅ | démarre l'OAuth (Strava/Coros/Garmin); renvoie l'URL |
@@ -158,3 +160,19 @@ conservent le payload brut dans `external_activities.raw`).
 | garmin-webhook | ❌ | push/ping d'activités Garmin |
 | device-sync | ✅ | import manuel (Strava/Coros/Garmin) |
 | device-disconnect | ✅ | délie un compte + révoque le jeton |
+
+## TODO — facturation club (à durcir avant la prod)
+À traiter avant d'ouvrir les paiements club à de vrais clubs (cf. `club-subscribe`) :
+
+1. **Vérifier l'`apiVersion` Stripe pour les abonnements Connect.**
+   `club-subscribe`/`club-connect` reprennent `apiVersion: "2024-06-20"` (cohérence
+   avec les fonctions existantes). Au déploiement, confirmer que `transfer_data` +
+   `application_fee_percent` posés sur `subscription_data` passent bien avec cette
+   version ; sinon bumper l'API Stripe (et re-tester un abo `sub`/`coach` en mode test).
+
+2. **Membre sans compte (`club_members.athlete_id` null).**
+   Aujourd'hui, si le gérant abonne un membre sans compte, le payeur retombe sur le
+   gérant (sa carte) — cf. `club-subscribe` l. ~74 (`payerId = member.athlete_id ?? user.id`).
+   OK pour la démo ; en prod, exiger d'**inviter/connecter le membre d'abord**
+   (lien d'invitation → compte → `athlete_id` rempli) avant de lancer un abonnement
+   récurrent à son nom.
