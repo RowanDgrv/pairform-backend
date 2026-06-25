@@ -73,6 +73,13 @@ begin
     (v_club, 'swim',  'Technique natation',      2, '12:15', 60, 'Piscine Nakache, Muret',      16, 'Julie', 0,  v_g_tri),
     (v_club, 'hyrox', 'Hyrox — simulation',      5, '19:00', 75, 'Box Hyrox Muret',             12, 'Karim', 15, v_g_hyrox);
 
+  -- Les 3 formules du club démo (15 / 59 / 119 €) — cf. 0006_club_billing.
+  insert into club_offers (club_id, tier, price, bill_interval) values
+    (v_club, 'dropin', 15,  'one_time'),
+    (v_club, 'sub',    59,  'month'),
+    (v_club, 'coach',  119, 'month')
+  on conflict (club_id, tier) do nothing;
+
   return 'Données démo créées pour ' || p_user || ' (club: ' || v_club || ').';
 end $$;
 

@@ -29,7 +29,7 @@ brew install stripe/stripe-cli/stripe
 
 ## 2. Pousser le schéma (14 + tables device-sync)
 ```bash
-supabase db push           # applique migrations/0001 … 0005
+supabase db push           # applique migrations/0001 … 0006
 ```
 > Vérifie dans Supabase → Table Editor que `device_connections`,
 > `external_activities`, `oauth_states` et la vue `my_devices` existent.
@@ -42,13 +42,24 @@ const SUPABASE_URL = "https://VOTRE-PROJET.supabase.co";
 const SUPABASE_ANON_KEY = "eyJ...anon...";
 ```
 
-## 4. Stripe (3 abonnements)
+## 4. Stripe (3 abonnements SaaS + formules club)
 1. https://dashboard.stripe.com (mode test) → **Produits** : crée 3 produits
    récurrents (Coach, Athlète, Club) → récupère les 3 `price_...`.
 2. Webhook : Developers → Webhooks → endpoint
    `https://VOTRE-PROJET.supabase.co/functions/v1/stripe-webhook`
-   events `checkout.session.completed`, `customer.subscription.*` →
-   récupère le `whsec_...`.
+   events `checkout.session.completed`, `customer.subscription.*`,
+   **`account.updated`** (statut Connect des clubs) → récupère le `whsec_...`.
+
+### 4b. Formules CLUB (vendues par un club à ses adhérents) — Stripe Connect
+- **Pas de Price ID à créer** : les tarifs des 3 formules (dropin 15€ one-shot,
+  sub 59€/mois, coach 119€/mois) sont **édités par chaque club** et envoyés en
+  `price_data` dynamique par `club-subscribe`.
+- Active **Connect** : dashboard → Connect → active les comptes **Express**.
+- Règle la commission plateforme via `PLATFORM_FEE_PERCENT` (0 par défaut) et
+  `STRIPE_CONNECT_COUNTRY` (FR) dans `.env`.
+- **Fallback démo** : tant qu'un club n'a pas fini son onboarding (`club-connect`
+  → `charges_enabled=false`), PairForm encaisse ; la bascule vers le club est
+  automatique une fois l'onboarding terminé (event `account.updated`).
 
 ## 5. Strava (synchro — inscription immédiate)
 1. https://www.strava.com/settings/api → crée une application.
@@ -68,6 +79,7 @@ supabase secrets set --env-file ./.env
 
 # Functions protégées par JWT (défaut) :
 supabase functions deploy stripe-checkout stripe-portal creneau-checkout \
+  club-subscribe club-connect \
   invite-athlete accept-invite video-url \
   device-connect device-sync device-disconnect
 

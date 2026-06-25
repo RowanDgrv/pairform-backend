@@ -64,6 +64,15 @@ Deno.serve(async (req) => {
         }
         break;
       }
+      // Connect : le club a (dé)complété son onboarding → MAJ charges_enabled.
+      case "account.updated": {
+        const acct = event.data.object as Stripe.Account;
+        const { error } = await supabase.from("clubs")
+          .update({ charges_enabled: acct.charges_enabled ?? false })
+          .eq("stripe_account_id", acct.id);
+        if (error) console.error("MAJ charges_enabled échouée :", error);
+        break;
+      }
       default:
         // autres événements ignorés
         break;
@@ -79,6 +88,11 @@ Deno.serve(async (req) => {
 });
 
 async function upsertSubscription(sub: Stripe.Subscription) {
+  // Une adhésion à une formule club est routée vers sa propre table.
+  if (sub.metadata?.kind === "club_membership") {
+    return await upsertClubMembership(sub);
+  }
+
   const userId = sub.metadata?.supabase_user_id;
   const plan = sub.metadata?.plan ?? "athlete";
   if (!userId) {
@@ -103,6 +117,35 @@ async function upsertSubscription(sub: Stripe.Subscription) {
     .upsert(row, { onConflict: "stripe_subscription_id" });
 
   if (error) console.error("Upsert subscription échoué :", error);
+}
+
+// Adhésion d'un membre à une formule club (sub | coach) : la source de vérité
+// est ici. Métadonnées posées par club-subscribe : { kind, club_id, member_id, tier }.
+async function upsertClubMembership(sub: Stripe.Subscription) {
+  const m = sub.metadata ?? {};
+  if (!m.club_id || !m.member_id) {
+    console.warn("Adhésion club sans club_id/member_id :", sub.id);
+    return;
+  }
+
+  const row = {
+    club_id: m.club_id,
+    member_id: m.member_id,
+    tier: m.tier ?? "sub",
+    status: sub.status,
+    stripe_customer_id: sub.customer as string,
+    stripe_subscription_id: sub.id,
+    price_id: sub.items.data[0]?.price?.id ?? null,
+    current_period_end: new Date(sub.current_period_end * 1000).toISOString(),
+    cancel_at_period_end: sub.cancel_at_period_end,
+    updated_at: new Date().toISOString(),
+  };
+
+  const { error } = await supabase
+    .from("club_memberships")
+    .upsert(row, { onConflict: "stripe_subscription_id" });
+
+  if (error) console.error("Upsert club_membership échoué :", error);
 }
 
 // Confirme le paiement d'un créneau à la carte : marque le paiement 'paid'

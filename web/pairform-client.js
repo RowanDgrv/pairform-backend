@@ -252,10 +252,44 @@ export const PF = {
     if (error) throw error; return data;
   },
   // Paiement à la carte d'un créneau tarifé (Hyrox, price > 0) → redirige Stripe.
+  // = formule « À la séance » (dropin), paiement one-shot.
   async payCreneau(creneauId, memberId) {
     const { url } = await this._invoke("creneau-checkout", {
       creneau_id: creneauId, member_id: memberId,
     });
+    window.location.href = url;
+  },
+
+  // -------- CLUB : les 3 formules & encaissement (Stripe) --------
+  // Les tarifs des 3 formules (dropin/sub/coach), éditables par le club.
+  async getClubOffers(clubId) {
+    const { data } = await sb.from("club_offers").select("*").eq("club_id", clubId);
+    return data ?? [];
+  },
+  // Met à jour le tarif d'une formule (gérant du club).
+  async saveClubOffer(clubId, tier, price) {
+    const { data, error } = await sb.from("club_offers")
+      .upsert({ club_id: clubId, tier, price }, { onConflict: "club_id,tier" })
+      .select().single();
+    if (error) throw error; return data;
+  },
+  // Abonne un membre à une formule RÉCURRENTE ('sub' | 'coach') → redirige Stripe.
+  // ('dropin' = paiement à la séance via payCreneau.)
+  async subscribeToClubOffer(clubId, memberId, tier) {
+    const { url } = await this._invoke("club-subscribe", {
+      club_id: clubId, member_id: memberId, tier,
+    });
+    window.location.href = url;
+  },
+  // Adhésions du club (gérant : toutes ; membre : la sienne via RLS).
+  async getClubMemberships(clubId) {
+    const { data } = await sb.from("club_memberships").select("*").eq("club_id", clubId);
+    return data ?? [];
+  },
+  // Démarre l'onboarding Stripe Connect du club (gérant) → redirige Stripe.
+  // Tant que non complété, club-subscribe encaisse côté PairForm (fallback démo).
+  async connectClubStripe(clubId) {
+    const { url } = await this._invoke("club-connect", { club_id: clubId });
     window.location.href = url;
   },
 
