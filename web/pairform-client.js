@@ -93,8 +93,14 @@ export const PF = {
     const { data } = await sb.from("coach_offers").select("*").eq("coach_id", coachId);
     return data ?? [];
   },
-  // Crée (sans id) ou met à jour (avec id) une offre de coaching. Coach only.
+  // Met à jour l'offre de coaching du coach (idempotent : réutilise l'offre
+  // existante si aucun id n'est fourni, pour ne pas créer de doublons).
   async saveCoachOffer({ id, name = "Suivi coaching", price }) {
+    if (!id) {
+      const { data: existing } = await sb.from("coach_offers")
+        .select("id").eq("coach_id", this.user.id).limit(1).maybeSingle();
+      if (existing) id = existing.id;
+    }
     const row = { coach_id: this.user.id, name, price };
     if (id) row.id = id;
     const { data, error } = await sb.from("coach_offers").upsert(row).select().single();
