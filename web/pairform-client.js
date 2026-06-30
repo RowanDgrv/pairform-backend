@@ -83,6 +83,29 @@ export const PF = {
     const sub = await this.mySubscription();
     return !!sub && ["active", "trialing"].includes(sub.status);
   },
+  // ---- Add-on « Assistant IA » du coach (option payante séparée) ----
+  // Le coach a-t-il l'add-on IA actif ? (lecture directe de la table d'entitlement)
+  async hasAiAddon() {
+    // plusieurs lignes possibles (historique d'abos) → on prend la plus récente
+    const { data } = await sb.from("ai_addons")
+      .select("status, current_period_end")
+      .order("updated_at", { ascending: false }).limit(1).maybeSingle();
+    if (!data) return false;
+    const live = ["active", "trialing"].includes(data.status);
+    const notExpired = !data.current_period_end || new Date(data.current_period_end) > new Date();
+    return live && notExpired;
+  },
+  // Active l'add-on IA → redirige vers le checkout Stripe (produit PairForm).
+  async subscribeAiAddon() {
+    const { url } = await this._invoke("ai-addon-subscribe", {});
+    window.location.href = url;
+  },
+  // Génère (ou relit depuis le cache) le résumé IA d'une séance.
+  // payload : { session_key, bilan, athlete_id?, discipline?, objective?, force? }
+  // Renvoie { verdict, headline, bullets, recos, model, cached } ou {error:'add_on_required'}.
+  async summarizeSession(payload) {
+    return await this._invoke("session-summary", payload);
+  },
   // Démarre l'onboarding Stripe Connect du COACH (pour facturer ses athlètes).
   async connectCoachStripe() {
     const { url } = await this._invoke("coach-connect", {});

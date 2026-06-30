@@ -100,6 +100,10 @@ async function upsertSubscription(sub: Stripe.Subscription) {
   if (sub.metadata?.kind === "coaching_subscription") {
     return await upsertCoachingSubscription(sub);
   }
+  // L'add-on Assistant IA du coach est routé vers sa propre table d'entitlement.
+  if (sub.metadata?.kind === "ai_addon") {
+    return await upsertAiAddon(sub);
+  }
 
   const userId = sub.metadata?.supabase_user_id;
   const plan = sub.metadata?.plan ?? "athlete";
@@ -125,6 +129,30 @@ async function upsertSubscription(sub: Stripe.Subscription) {
     .upsert(row, { onConflict: "stripe_subscription_id" });
 
   if (error) console.error("Upsert subscription échoué :", error);
+}
+
+// Add-on « Assistant IA » du coach. Métadonnées posées par ai-addon-subscribe :
+// { kind: "ai_addon", user_id }. C'est l'entitlement qui débloque session-summary.
+async function upsertAiAddon(sub: Stripe.Subscription) {
+  const userId = sub.metadata?.user_id;
+  if (!userId) {
+    console.warn("ai_addon sans user_id :", sub.id);
+    return;
+  }
+  const row = {
+    user_id: userId,
+    status: sub.status,
+    stripe_customer_id: sub.customer as string,
+    stripe_subscription_id: sub.id,
+    price_id: sub.items.data[0]?.price?.id ?? null,
+    current_period_end: new Date(sub.current_period_end * 1000).toISOString(),
+    cancel_at_period_end: sub.cancel_at_period_end,
+    updated_at: new Date().toISOString(),
+  };
+  const { error } = await supabase
+    .from("ai_addons")
+    .upsert(row, { onConflict: "stripe_subscription_id" });
+  if (error) console.error("Upsert ai_addon échoué :", error);
 }
 
 // Adhésion d'un membre à une formule club (sub | coach) : la source de vérité

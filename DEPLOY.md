@@ -178,3 +178,19 @@ conservent le payload brut dans `external_activities.raw`).
    OK pour la démo ; en prod, exiger d'**inviter/connecter le membre d'abord**
    (lien d'invitation → compte → `athlete_id` rempli) avant de lancer un abonnement
    récurrent à son nom.
+
+## Add-on « Assistant IA » coach (migration 0009)
+Active le résumé + recommandations par séance (Claude). Voir `PAIRFORM-AI-ADDON-PLAN.md`.
+
+1. **Migration** : `supabase db push` (applique `0009_ai_addon.sql` → tables `ai_addons`,
+   `session_summaries`, helper `has_ai_addon`).
+2. **Secrets** : renseigner `ANTHROPIC_API_KEY` (+ éventuellement `ANTHROPIC_MODEL`,
+   `AI_ADDON_PRICE_EUR`, `STRIPE_PRICE_AI`) puis `supabase secrets set --env-file .env`.
+3. **Déployer les fonctions** (gate JWT, NE PAS mettre `--no-verify-jwt`) :
+   `supabase functions deploy session-summary ai-addon-subscribe`
+4. **Webhook** : aucune action — `stripe-webhook` route déjà `metadata.kind === "ai_addon"`
+   vers `ai_addons` (déployer la nouvelle version du webhook).
+5. **Vérif** : un coach sans add-on appelant `session-summary` reçoit `402 add_on_required` ;
+   après checkout `ai-addon-subscribe` + webhook, `has_ai_addon` passe à true et l'analyse se génère.
+
+> Coût maîtrisé : prompt caching des rubriques + cache `session_summaries` (1 appel API max/séance).
