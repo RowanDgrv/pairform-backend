@@ -8,7 +8,7 @@
 --  Modèle CONNECT-READY :
 --    - Si le club a relié son compte Stripe (stripe_account_id + charges_enabled),
 --      l'argent va AU CLUB (destination charges) avec commission plateforme.
---    - Sinon, fallback : PairForm encaisse → la démo fonctionne immédiatement,
+--    - Sinon, fallback : Sillance encaisse → la démo fonctionne immédiatement,
 --      et la bascule en Connect est automatique dès que le club s'onboarde.
 --
 --  Écriture des adhésions = SERVICE_ROLE uniquement (le webhook Stripe fait foi).

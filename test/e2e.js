@@ -1,4 +1,4 @@
-// Test end-to-end du flux PairForm contre le projet Supabase cloud.
+// Test end-to-end du flux Sillance contre le projet Supabase cloud.
 // Reproduit exactement les appels que fait l'app (mêmes tables/fonctions).
 // Lit : SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY
 import { createClient } from "@supabase/supabase-js";
@@ -16,7 +16,7 @@ const ok  = (m) => { console.log("  ✅", m); pass++; };
 const bad = (m) => { console.log("  ❌", m); fail++; };
 const check = (cond, m) => cond ? ok(m) : bad(m);
 
-const email = `e2e+${Date.now()}@pairform.test`;
+const email = `e2e+${Date.now()}@sillance.test`;
 const password = "Test1234!pf";
 let userId;
 
@@ -78,7 +78,7 @@ try {
   check(done.done === true && done.rpe === 7, "séance marquée done=true, rpe=7 en base");
 
   console.log("\n7) RLS — un AUTRE utilisateur ne doit PAS voir ces données");
-  const otherEmail = `e2e-intrus+${Date.now()}@pairform.test`;
+  const otherEmail = `e2e-intrus+${Date.now()}@sillance.test`;
   const { data: other } = await admin.auth.admin.createUser({ email: otherEmail, password, email_confirm: true });
   const { data: oSign } = await anon.auth.signInWithPassword({ email: otherEmail, password });
   const otherClient = createClient(URL, ANON, {

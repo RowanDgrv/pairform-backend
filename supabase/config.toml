@@ -1,4 +1,4 @@
-project_id = "pairform"
+project_id = "sillance"
 
 [functions.stripe-checkout]
 verify_jwt = true

@@ -1,7 +1,7 @@
 // =============================================================================
 //  Edge Function : ai-addon-subscribe
-//  Le COACH active l'add-on « Assistant IA » (~12 €/mois) — produit PairForm,
-//  donc PAS de Connect : c'est PairForm qui encaisse (contrairement à
+//  Le COACH active l'add-on « Assistant IA » (~12 €/mois) — produit Sillance,
+//  donc PAS de Connect : c'est Sillance qui encaisse (contrairement à
 //  coach-subscribe où l'argent va au coach).
 //
 //  Body : {} (le payeur = l'utilisateur connecté)
@@ -59,7 +59,7 @@ Deno.serve(async (req) => {
             currency: "eur",
             unit_amount: Math.round(AI_PRICE_EUR * 100),
             recurring: { interval: "month" },
-            product_data: { name: "PairForm — Assistant IA (add-on coach)" },
+            product_data: { name: "Sillance — Assistant IA (add-on coach)" },
           },
         };
 

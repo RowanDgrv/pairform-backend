@@ -1,5 +1,5 @@
 // En-têtes CORS partagés par les edge functions.
-// En prod, remplace '*' par l'origine de ton front (ex: https://app.pairform.xxx).
+// En prod, remplace '*' par l'origine de ton front (ex: https://app.sillance.xxx).
 export const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":

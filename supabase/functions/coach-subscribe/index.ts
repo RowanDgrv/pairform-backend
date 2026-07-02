@@ -3,7 +3,7 @@
 //  Un ATHLÈTE s'abonne au SUIVI d'un COACH (abonnement mensuel récurrent).
 //  Boucle la boucle avec coach-connect : le coach a relié son compte Stripe,
 //  l'athlète paie ici → l'argent va au coach (destination charges) si relié,
-//  sinon fallback PairForm encaisse (démo). Prix dynamique (coach_offers).
+//  sinon fallback Sillance encaisse (démo). Prix dynamique (coach_offers).
 //
 //  Body : { coach_id: string, athlete_id?: string, offer_id?: string }
 //    - athlete_id par défaut = l'utilisateur connecté (auto-abonnement).
@@ -75,7 +75,7 @@ Deno.serve(async (req) => {
         .update({ stripe_customer_id: customerId }).eq("id", athleteId);
     }
 
-    // --- Connect : routage vers le coach si relié, sinon PairForm encaisse ----
+    // --- Connect : routage vers le coach si relié, sinon Sillance encaisse ----
     const connected = !!coach.stripe_account_id && coach.charges_enabled === true;
     const subscription_data: Record<string, unknown> = {
       metadata: { kind: "coaching_subscription", coach_id, athlete_id: athleteId, offer_id: offer.id },

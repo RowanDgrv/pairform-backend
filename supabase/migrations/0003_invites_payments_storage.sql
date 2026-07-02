@@ -1,5 +1,5 @@
 -- =============================================================================
---  PairForm — Migration 0003
+--  Sillance — Migration 0003
 --  Ajoute : invitations coach→athlète, paiement des créneaux à la carte,
 --  bucket Storage privé pour les vidéos, et triggers updated_at génériques.
 -- =============================================================================

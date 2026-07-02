@@ -5,7 +5,7 @@
 --    0007 = le coach encaisse (Connect) · 0008 = l'athlète s'abonne au coach.
 --
 --  Connect-ready : l'argent va au coach si son compte est relié (charges_enabled),
---  sinon fallback PairForm. Écriture des abos = service_role (webhook) only.
+--  sinon fallback Sillance. Écriture des abos = service_role (webhook) only.
 -- =============================================================================
 
 -- ---- Offre(s) de coaching d'un coach (tarif éditable) ------------------------

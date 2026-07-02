@@ -1,4 +1,4 @@
-# PairForm — Mise en ligne du back-end (runbook démo)
+# Sillance — Mise en ligne du back-end (runbook démo)
 
 Objectif : un environnement réel pour (a) une démo investisseurs et (b) obtenir
 les autorisations de synchronisation **Strava / Garmin / Coros**.
@@ -35,7 +35,7 @@ supabase db push           # applique migrations/0001 … 0008
 > `external_activities`, `oauth_states` et la vue `my_devices` existent.
 
 ## 3. Renseigner le front
-Dans `web/pairform-client.js` (et la copie dans `~/Downloads/files_extracted/`),
+Dans `web/sillance-client.js` (et la copie dans `~/Downloads/files_extracted/`),
 remplace en haut :
 ```js
 const SUPABASE_URL = "https://VOTRE-PROJET.supabase.co";
@@ -58,7 +58,7 @@ const SUPABASE_ANON_KEY = "eyJ...anon...";
 - Règle la commission plateforme via `PLATFORM_FEE_PERCENT` (0 par défaut) et
   `STRIPE_CONNECT_COUNTRY` (FR) dans `.env`.
 - **Fallback démo** : tant qu'un club n'a pas fini son onboarding (`club-connect`
-  → `charges_enabled=false`), PairForm encaisse ; la bascule vers le club est
+  → `charges_enabled=false`), Sillance encaisse ; la bascule vers le club est
   automatique une fois l'onboarding terminé (event `account.updated`).
 
 ## 5. Strava (synchro — inscription immédiate)
@@ -99,7 +99,7 @@ curl -X POST https://www.strava.com/api/v3/push_subscriptions \
   -F client_id=$STRAVA_CLIENT_ID \
   -F client_secret=$STRAVA_CLIENT_SECRET \
   -F callback_url=https://VOTRE-PROJET.supabase.co/functions/v1/strava-webhook \
-  -F verify_token=pairform-strava
+  -F verify_token=sillance-strava
 ```
 Strava appelle l'URL en GET pour valider (la function renvoie le `hub.challenge`),
 puis pousse chaque nouvelle activité. Une seule souscription par application.
@@ -180,7 +180,7 @@ conservent le payload brut dans `external_activities.raw`).
    récurrent à son nom.
 
 ## Add-on « Assistant IA » coach (migration 0009)
-Active le résumé + recommandations par séance (Claude). Voir `PAIRFORM-AI-ADDON-PLAN.md`.
+Active le résumé + recommandations par séance (Claude). Voir `SILLANCE-AI-ADDON-PLAN.md`.
 
 1. **Migration** : `supabase db push` (applique `0009_ai_addon.sql` → tables `ai_addons`,
    `session_summaries`, helper `has_ai_addon`).

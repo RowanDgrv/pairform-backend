@@ -1,5 +1,5 @@
 /* ============================================================
-   PairForm — Import d'activités .TCX / .GPX  (window.PFFit)
+   Sillance — Import d'activités .TCX / .GPX  (window.PFFit)
    ------------------------------------------------------------
    Convertit un fichier exporté d'une montre (Garmin, Coros, Polar…)
    en la MÊME structure que genSessionData() de l'app, afin que tout

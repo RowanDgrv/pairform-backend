@@ -1,4 +1,4 @@
-# PairForm — Back-end (Supabase + Stripe)
+# Sillance — Back-end (Supabase + Stripe)
 
 Back-end pour l'app de coaching triathlon/Hyrox. Couvre **les 3 rôles d'un coup** :
 coach (phase 1), athlète B2C (phase 3) et club (phase 2). Conçu pour se brancher
@@ -27,7 +27,7 @@ supabase/
     _shared/cors.ts
   config.toml
 web/
-  pairform-client.js       → pont navigateur : auth + données + Stripe + invites
+  sillance-client.js       → pont navigateur : auth + données + Stripe + invites
 .env.example               → secrets à renseigner
 ```
 
@@ -103,15 +103,15 @@ sont déjà câblés, de façon **non destructive** :
 
 - Un hook `window.__pf_app` est exposé après le boot (donne accès aux globales +
   fonctions de rendu).
-- `pairform-integration.js` (couche d'intégration) ajoute un **overlay de
+- `sillance-integration.js` (couche d'intégration) ajoute un **overlay de
   connexion/inscription** (badge ☁︎ en haut à droite) et, une fois connecté,
   **hydrate les données depuis Supabase** puis re-render.
 - **Tant que personne n'est connecté → l'app reste en mode démo** (données en
   dur intactes). Si le backend n'est pas configuré, idem : rien ne casse.
 
 **Pour activer :**
-1. Renseigne `SUPABASE_URL` et `SUPABASE_ANON_KEY` dans `pairform-client.js`.
-2. Les fichiers `pairform-client.js` et `pairform-integration.js` doivent être
+1. Renseigne `SUPABASE_URL` et `SUPABASE_ANON_KEY` dans `sillance-client.js`.
+2. Les fichiers `sillance-client.js` et `sillance-integration.js` doivent être
    **à côté des HTML** (déjà copiés dans `~/Downloads/files_extracted/` ; la
    source de vérité reste `~/pairform-backend/web/`).
 3. **Sers les fichiers en HTTP** (les modules ES ne se chargent pas en `file://`) :
@@ -155,7 +155,7 @@ un template coach, et le club « Muret Goat Squad » (groupes + membres + créne
 - [x] Paiement **créneaux à la carte** (Hyrox, `price > 0`) via Checkout one-shot.
 - [x] Storage privé pour les **vidéos premium** + URLs signées selon l'abo.
 - [x] Helper de gating (`has_active_subscription` / `PF.isSubscribed`).
-- [x] **Brancher les HTML** sur Supabase (hook `__pf_app` + `pairform-integration.js`,
+- [x] **Brancher les HTML** sur Supabase (hook `__pf_app` + `sillance-integration.js`,
       lecture/hydratation).
 - [x] Câbler les **écritures** UI → `PF.*` dans les 2 HTML : valider check-in
       (`saveCheckin`), valider/annuler une séance (`markSessionDone`), supprimer une

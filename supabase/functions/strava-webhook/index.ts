@@ -16,7 +16,7 @@ Deno.serve(async (req) => {
     const mode = url.searchParams.get("hub.mode");
     const token = url.searchParams.get("hub.verify_token");
     const challenge = url.searchParams.get("hub.challenge");
-    const expected = Deno.env.get("STRAVA_VERIFY_TOKEN") ?? "pairform";
+    const expected = Deno.env.get("STRAVA_VERIFY_TOKEN") ?? "sillance";
     if (mode === "subscribe" && token === expected && challenge) {
       return new Response(JSON.stringify({ "hub.challenge": challenge }), {
         status: 200, headers: { "Content-Type": "application/json" },

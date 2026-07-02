@@ -1,5 +1,5 @@
 -- =============================================================================
---  PairForm — Migration 0004 : fonction de données démo à la demande.
+--  Sillance — Migration 0004 : fonction de données démo à la demande.
 --  Usage : une fois inscrit/connecté, lance dans le SQL Editor :
 --      select seed_demo(auth.uid());
 --  Remplit, pour CET utilisateur, des données de test couvrant les 3 rôles

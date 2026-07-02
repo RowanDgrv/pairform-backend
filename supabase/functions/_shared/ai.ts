@@ -1,5 +1,5 @@
 // =============================================================================
-//  _shared/ai.ts — Assistant IA PairForm
+//  _shared/ai.ts — Assistant IA Sillance
 //  Appelle Claude pour transformer un BILAN CHIFFRÉ (déjà calculé par l'app)
 //  en verdict + recommandations de coach. Claude NE CALCULE RIEN : il ne reçoit
 //  que des nombres déjà mesurés → réponses courtes, fiables, vérifiables.

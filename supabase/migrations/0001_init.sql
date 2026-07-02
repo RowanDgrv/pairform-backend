@@ -1,5 +1,5 @@
 -- =============================================================================
---  PairForm — Schéma initial (Supabase / Postgres)
+--  Sillance — Schéma initial (Supabase / Postgres)
 --  Couvre les 3 rôles : coach (phase 1), athlète B2C (phase 3), club (phase 2).
 --  Calé sur le modèle de données des fichiers HTML existants :
 --    disciplines (swim/bike/run/strength/hyrox), séances + blocs JSON,

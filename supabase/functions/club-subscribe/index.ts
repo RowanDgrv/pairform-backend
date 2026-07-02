@@ -6,7 +6,7 @@
 //
 //  CONNECT-READY : si le club a relié son compte Stripe (charges_enabled),
 //  l'encaissement est routé vers le club (destination charges) avec commission
-//  plateforme PLATFORM_FEE_PERCENT ; sinon fallback → PairForm encaisse (démo).
+//  plateforme PLATFORM_FEE_PERCENT ; sinon fallback → Sillance encaisse (démo).
 //
 //  « À la séance » (dropin, one-shot) reste géré par creneau-checkout.
 //
@@ -89,7 +89,7 @@ Deno.serve(async (req) => {
         .update({ stripe_customer_id: customerId }).eq("id", payerId);
     }
 
-    // --- Connect : routage vers le club si relié, sinon PairForm encaisse -----
+    // --- Connect : routage vers le club si relié, sinon Sillance encaisse -----
     const connected = !!club.stripe_account_id && club.charges_enabled === true;
     const subscription_data: Record<string, unknown> = {
       metadata: { kind: "club_membership", club_id, member_id, tier },

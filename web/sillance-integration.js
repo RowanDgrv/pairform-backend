@@ -1,5 +1,5 @@
 /* =============================================================================
- *  PairForm — couche d'intégration (branche l'app HTML sur Supabase)
+ *  Sillance — couche d'intégration (branche l'app HTML sur Supabase)
  *
  *  Principe NON DESTRUCTIF :
  *   - Tant qu'aucun utilisateur n'est connecté → on ne touche à RIEN.
@@ -10,10 +10,10 @@
  *     puis on re-render.
  *
  *  Dépend de :
- *   - window.PF        (exposé par pairform-client.js)
+ *   - window.PF        (exposé par sillance-client.js)
  *   - window.__pf_app  (hook exposé par le <script> inline de l'app)
  * ========================================================================== */
-import { PF } from "./pairform-client.js";
+import { PF } from "./sillance-client.js";
 window.PF = PF;
 
 const A = () => window.__pf_app;   // raccourci vers le hook de l'app
@@ -125,7 +125,7 @@ async function section(name, fn) {
 }
 
 /* ===========================================================================
- *  AUTH UI — overlay de connexion / inscription (thème sombre PairForm)
+ *  AUTH UI — overlay de connexion / inscription (thème sombre Sillance)
  * ========================================================================= */
 function injectStyles() {
   if (document.getElementById("pf-auth-style")) return;
@@ -205,7 +205,7 @@ function renderAuth() {
   if (!card) return;
   const isUp = authMode === "signup";
   card.innerHTML = `
-    <h2>PairForm</h2>
+    <h2>Sillance</h2>
     <p class="sub">${isUp ? "Crée ton compte" : "Connecte-toi à ton espace"}</p>
     ${isUp ? `
       <label>Nom complet</label><input id="pf-name" placeholder="Prénom Nom">

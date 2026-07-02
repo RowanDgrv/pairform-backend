@@ -2,11 +2,11 @@
 //  Lib partagée — envoi d'emails transactionnels via Resend.
 //  Si RESEND_API_KEY est absent, l'envoi est ignoré (renvoie false) : le flux
 //  d'invitation continue de fonctionner en renvoyant le lien à partager.
-//  Secrets : RESEND_API_KEY, RESEND_FROM (ex: "PairForm <invite@pairform.app>").
+//  Secrets : RESEND_API_KEY, RESEND_FROM (ex: "Sillance <invite@sillance.app>").
 // =============================================================================
 export async function sendEmail(opts: { to: string; subject: string; html: string }): Promise<boolean> {
   const key = Deno.env.get("RESEND_API_KEY");
-  const from = Deno.env.get("RESEND_FROM") ?? "PairForm <onboarding@resend.dev>";
+  const from = Deno.env.get("RESEND_FROM") ?? "Sillance <onboarding@resend.dev>";
   if (!key) return false;
 
   const res = await fetch("https://api.resend.com/emails", {
@@ -25,8 +25,8 @@ export async function sendEmail(opts: { to: string; subject: string; html: strin
 export function inviteEmailHtml(opts: { coachName: string; inviteUrl: string }): string {
   return `
   <div style="font-family:system-ui,Segoe UI,sans-serif;max-width:480px;margin:0 auto;color:#0f1720">
-    <h2 style="font-weight:800;letter-spacing:.4px">PairForm</h2>
-    <p>${escapeHtml(opts.coachName)} t'invite à rejoindre son espace coaching sur PairForm.</p>
+    <h2 style="font-weight:800;letter-spacing:.4px">Sillance</h2>
+    <p>${escapeHtml(opts.coachName)} t'invite à rejoindre son espace coaching sur Sillance.</p>
     <p>Tu y retrouveras ton plan d'entraînement, tes séances et ton suivi.</p>
     <p style="margin:28px 0">
       <a href="${opts.inviteUrl}" style="background:#46C2D8;color:#06222a;text-decoration:none;

@@ -8,7 +8,7 @@
 --                             écrit UNIQUEMENT par le webhook Stripe (vérité).
 --    2. session_summaries    = cache des résumés déjà générés par Claude
 --                             (1 appel API max par séance, jamais recalculé).
---  Voir aussi PAIRFORM-AI-ADDON-PLAN.md (coût/marge/justification du prix).
+--  Voir aussi SILLANCE-AI-ADDON-PLAN.md (coût/marge/justification du prix).
 -- =============================================================================
 
 -- ---- Entitlement add-on IA (par coach) --------------------------------------

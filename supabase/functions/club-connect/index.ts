@@ -5,7 +5,7 @@
 //  s'il n'existe pas encore, puis renvoie un lien d'onboarding Stripe.
 //
 //  Le statut `charges_enabled` est mis à jour par le webhook (account.updated).
-//  Tant qu'il est false, club-subscribe fait le fallback (PairForm encaisse).
+//  Tant qu'il est false, club-subscribe fait le fallback (Sillance encaisse).
 //
 //  Body : { club_id: string }
 //  Auth : JWT Supabase. Réservé au gérant (owner) du club.

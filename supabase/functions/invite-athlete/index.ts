@@ -60,7 +60,7 @@ Deno.serve(async (req) => {
     try {
       emailed = await sendEmail({
         to: email,
-        subject: `${coachName} t'invite sur PairForm`,
+        subject: `${coachName} t'invite sur Sillance`,
         html: inviteEmailHtml({ coachName, inviteUrl }),
       });
     } catch (e) { console.error("email:", e); }
