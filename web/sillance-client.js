@@ -106,6 +106,26 @@ export const PF = {
   async summarizeSession(payload) {
     return await this._invoke("session-summary", payload);
   },
+  // ---- Option « Vidéos » PAR ATHLÈTE (le coach paie un siège par athlète) ----
+  // Liste des activations vidéo du coach connecté : [{athlete_id, active}].
+  async getVideoAccess() {
+    const { data } = await sb.from("video_access")
+      .select("athlete_id, active").eq("coach_id", this.user.id);
+    return data ?? [];
+  },
+  // Le coach (dés)active les vidéos pour un athlète. Renvoie {url} si un
+  // paiement est requis (1er siège) → on redirige ; sinon {ok, seats}.
+  async setAthleteVideos(athleteId, enabled) {
+    const res = await this._invoke("video-seats-set", { athlete_id: athleteId, enabled });
+    if (res?.url) { window.location.href = res.url; return res; }
+    return res;
+  },
+  // L'athlète connecté a-t-il accès aux vidéos ? (activé par son coach ET payé)
+  async athleteHasVideos() {
+    const { data, error } = await sb.rpc("athlete_has_videos");
+    if (error) { console.warn("athlete_has_videos:", error.message); return false; }
+    return !!data;
+  },
   // Démarre l'onboarding Stripe Connect du COACH (pour facturer ses athlètes).
   async connectCoachStripe() {
     const { url } = await this._invoke("coach-connect", {});

@@ -104,6 +104,10 @@ async function upsertSubscription(sub: Stripe.Subscription) {
   if (sub.metadata?.kind === "ai_addon") {
     return await upsertAiAddon(sub);
   }
+  // Les « sièges vidéo » du coach (1 par athlète activé) → table video_seats.
+  if (sub.metadata?.kind === "video_seats") {
+    return await upsertVideoSeats(sub);
+  }
 
   const userId = sub.metadata?.supabase_user_id;
   const plan = sub.metadata?.plan ?? "athlete";
@@ -153,6 +157,32 @@ async function upsertAiAddon(sub: Stripe.Subscription) {
     .from("ai_addons")
     .upsert(row, { onConflict: "stripe_subscription_id" });
   if (error) console.error("Upsert ai_addon échoué :", error);
+}
+
+// Sièges vidéo du coach : 1 abonnement dont la quantité = nb d'athlètes activés.
+// Métadonnées posées par video-seats-set : { kind: "video_seats", coach_id }.
+async function upsertVideoSeats(sub: Stripe.Subscription) {
+  const coachId = sub.metadata?.coach_id;
+  if (!coachId) {
+    console.warn("video_seats sans coach_id :", sub.id);
+    return;
+  }
+  const item = sub.items.data[0];
+  const row = {
+    coach_id: coachId,
+    stripe_customer_id: sub.customer as string,
+    stripe_subscription_id: sub.id,
+    stripe_item_id: item?.id ?? null,
+    seats: item?.quantity ?? 0,
+    status: sub.status,
+    current_period_end: new Date(sub.current_period_end * 1000).toISOString(),
+    cancel_at_period_end: sub.cancel_at_period_end,
+    updated_at: new Date().toISOString(),
+  };
+  const { error } = await supabase
+    .from("video_seats")
+    .upsert(row, { onConflict: "coach_id" });
+  if (error) console.error("Upsert video_seats échoué :", error);
 }
 
 // Adhésion d'un membre à une formule club (sub | coach) : la source de vérité

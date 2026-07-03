@@ -17,6 +17,7 @@ import { PF } from "./sillance-client.js";
 window.PF = PF;
 
 const A = () => window.__pf_app;   // raccourci vers le hook de l'app
+const TRIAL_DAYS = 14;             // durée de l'essai gratuit coach (jours)
 
 /* -------- petits utilitaires de mapping DB → formes de l'app -------- */
 const mapRecord  = (r) => ({ d: r.label, v: r.value, isNew: r.is_new });
@@ -106,6 +107,23 @@ async function hydrate() {
     const ok = await PF.isSubscribed();
     document.body.classList.toggle("pf-subscribed", ok);
     window.__pf_subscribed = ok;
+    // Essai gratuit + paywall du coach (l'abo 29€ est le produit Phase 1).
+    const role = PF.profile?.role;
+    let trialDaysLeft = null, locked = false;
+    if (role === "coach" && !ok) {
+      const created = PF.profile?.created_at ? new Date(PF.profile.created_at) : null;
+      if (created && !isNaN(created)) {
+        const end = new Date(created.getTime() + TRIAL_DAYS * 86400000);
+        trialDaysLeft = Math.ceil((end - Date.now()) / 86400000);
+        locked = trialDaysLeft <= 0;
+      }
+    }
+    window.__pf_trial_days = trialDaysLeft;
+    renderCoachGate({ subscribed: ok, role, trialDaysLeft, locked });
+    // Vidéos : réservées aux athlètes que leur coach a activés (et payés).
+    const videosOk = role === "athlete" ? await PF.athleteHasVideos() : true;
+    window.__pf_videos_ok = videosOk;
+    renderVideoGate({ role, videosOk });
   });
 
   // Re-render complet avec les données fraîches.
@@ -130,9 +148,11 @@ async function section(name, fn) {
 function injectStyles() {
   if (document.getElementById("pf-auth-style")) return;
   const css = `
-  #pf-cloud-badge{position:fixed;top:10px;right:12px;z-index:9998;font:600 12px/1 system-ui;
-    padding:6px 10px;border-radius:99px;background:#161a1f;color:#8a949e;border:1px solid #2a2f37;cursor:pointer}
-  #pf-cloud-badge.on{color:#39e6a3;border-color:#235}
+  #pf-cloud-badge{position:fixed;top:12px;right:14px;z-index:9998;font:700 13px/1 'Archivo',system-ui;
+    padding:9px 15px;border-radius:99px;background:#46C2D8;color:#06222a;border:1px solid #46C2D8;cursor:pointer;
+    box-shadow:0 6px 18px -6px rgba(70,194,216,.6);transition:filter .15s,transform .15s}
+  #pf-cloud-badge:hover{filter:brightness(1.06);transform:translateY(-1px)}
+  #pf-cloud-badge.on{background:#12171d;color:#39e6a3;border-color:#274;box-shadow:none;font-weight:600}
   #pf-auth-overlay{position:fixed;inset:0;z-index:9999;background:rgba(8,10,13,.82);
     display:none;align-items:center;justify-content:center;backdrop-filter:blur(4px)}
   #pf-auth-overlay.open{display:flex}
@@ -250,6 +270,111 @@ async function submitAuth() {
     await onLoggedIn();
   } catch (e) {
     err.textContent = e?.message || "Erreur de connexion.";
+  }
+}
+
+/* ===========================================================================
+ *  PAYWALL COACH — essai gratuit puis blocage (abo Sillance 29€/mois)
+ *  - trial actif   → bandeau discret « X jours restants · S'abonner »
+ *  - trial terminé → overlay bloquant plein écran (le coach doit s'abonner)
+ *  - abonné        → rien
+ *  Non destructif : n'agit QUE pour un compte de rôle coach non abonné.
+ * ========================================================================= */
+function injectGateStyles() {
+  if (document.getElementById("pf-gate-style")) return;
+  const css = `
+  #pf-trial-banner{position:fixed;left:0;right:0;top:0;z-index:9990;
+    background:#12313a;color:#d9f5fb;font:600 13px/1.3 'Archivo',system-ui;
+    padding:9px 16px;text-align:center;border-bottom:1px solid #1c4a56}
+  #pf-trial-banner b{color:#46C2D8}
+  #pf-trial-banner button{margin-left:12px;border:1px solid #46C2D8;background:#46C2D8;color:#06222a;
+    border-radius:99px;padding:5px 13px;font:700 12px 'Archivo',system-ui;cursor:pointer}
+  #pf-trial-banner button:hover{filter:brightness(1.06)}
+  #pf-lock-overlay{position:fixed;inset:0;z-index:9995;background:rgba(6,8,11,.9);
+    display:flex;align-items:center;justify-content:center;backdrop-filter:blur(6px)}
+  #pf-lock-overlay .card{max-width:420px;width:92%;background:#0f151b;border:1px solid #223;
+    border-radius:16px;padding:30px 28px;text-align:center;box-shadow:0 30px 80px -20px rgba(0,0,0,.7)}
+  #pf-lock-overlay h2{font:800 22px/1.15 'Oswald','Archivo',system-ui;color:#eaf6f9;margin:0 0 8px;letter-spacing:.2px}
+  #pf-lock-overlay p{font:400 14px/1.5 'Archivo',system-ui;color:#9fb0bb;margin:0 0 20px}
+  #pf-lock-overlay .price{font:800 30px 'Oswald',system-ui;color:#46C2D8;margin-bottom:2px}
+  #pf-lock-overlay .price small{font:600 13px 'Archivo';color:#7d8d98}
+  #pf-lock-overlay .go{width:100%;border:0;background:#46C2D8;color:#06222a;border-radius:11px;
+    padding:13px;font:800 15px 'Archivo',system-ui;cursor:pointer;margin-top:16px}
+  #pf-lock-overlay .go:hover{filter:brightness(1.06)}
+  #pf-lock-overlay .out{display:inline-block;margin-top:14px;color:#7d8d98;font:500 12.5px 'Archivo';
+    background:none;border:0;cursor:pointer;text-decoration:underline}
+  #videolib.pf-vlocked > :not(h2):not(#pf-video-teaser){display:none!important}
+  #pf-video-teaser{border:1px dashed #2a3b44;border-radius:12px;padding:26px 20px;margin-top:14px;
+    text-align:center;background:rgba(70,194,216,.04)}
+  #pf-video-teaser .t{font:800 16px 'Oswald',system-ui;color:#eaf6f9;margin-bottom:6px}
+  #pf-video-teaser .s{font:400 13.5px/1.5 'Archivo',system-ui;color:#9fb0bb}`;
+  const s = document.createElement("style");
+  s.id = "pf-gate-style"; s.textContent = css;
+  document.head.appendChild(s);
+}
+
+function renderCoachGate({ subscribed, role, trialDaysLeft, locked }) {
+  injectGateStyles();
+  const banner = document.getElementById("pf-trial-banner");
+  const overlay = document.getElementById("pf-lock-overlay");
+  // Nettoyage : tout retirer par défaut, on ré-affiche selon l'état.
+  if (banner) banner.remove();
+  if (overlay) overlay.remove();
+  document.body.style.paddingTop = "";
+  if (subscribed || role !== "coach") return;   // abonné ou pas coach → rien
+
+  if (locked) {
+    const o = document.createElement("div");
+    o.id = "pf-lock-overlay";
+    o.innerHTML = `
+      <div class="card">
+        <h2>Ton essai gratuit est terminé</h2>
+        <p>Abonne-toi à Sillance pour continuer à coacher tes athlètes, planifier et analyser.</p>
+        <div class="price">29 €<small> /mois</small></div>
+        <button class="go" id="pf-lock-go">S'abonner à Sillance</button>
+        <button class="out" id="pf-lock-out">Se déconnecter</button>
+      </div>`;
+    document.body.appendChild(o);
+    o.querySelector("#pf-lock-go").onclick = () =>
+      PF.startCheckout("coach").catch((e) => console.warn("[PF] checkout:", e));
+    o.querySelector("#pf-lock-out").onclick = async () => {
+      try { await PF.signOut(); } catch (_) {} location.reload();
+    };
+    return;
+  }
+
+  if (trialDaysLeft != null) {
+    const b = document.createElement("div");
+    b.id = "pf-trial-banner";
+    const j = trialDaysLeft <= 1 ? "dernier jour" : `${trialDaysLeft} jours restants`;
+    b.innerHTML = `🎁 Essai gratuit — <b>${j}</b>
+      <button id="pf-trial-go">S'abonner (29 €/mois)</button>`;
+    document.body.appendChild(b);
+    document.body.style.paddingTop = b.offsetHeight + "px";
+    b.querySelector("#pf-trial-go").onclick = () =>
+      PF.startCheckout("coach").catch((e) => console.warn("[PF] checkout:", e));
+  }
+}
+
+// Vidéos côté ATHLÈTE : masque la bibliothèque tant que le coach ne l'a pas
+// activée pour lui, et affiche un message d'invitation. Coach/club/démo intacts.
+function renderVideoGate({ role, videosOk }) {
+  injectGateStyles();
+  const lib = document.getElementById("videolib");
+  if (!lib) return;
+  const locked = role === "athlete" && !videosOk;
+  lib.classList.toggle("pf-vlocked", locked);
+  let teaser = document.getElementById("pf-video-teaser");
+  if (locked) {
+    if (!teaser) {
+      teaser = document.createElement("div");
+      teaser.id = "pf-video-teaser";
+      teaser.innerHTML = `<div class="t">🔒 Vidéos d'exercices réservées</div>
+        <div class="s">Ton coach peut débloquer les vidéos de démonstration pour toi.<br>Demande-lui d'activer l'option dans son espace.</div>`;
+      lib.appendChild(teaser);
+    }
+  } else if (teaser) {
+    teaser.remove();
   }
 }
 
