@@ -127,6 +127,40 @@ export const PF = {
     return !!data;
   },
   // Démarre l'onboarding Stripe Connect du COACH (pour facturer ses athlètes).
+  // ---- Matériel : usure chaussures / vélos (table gear, RLS par athlète) ------
+  // Liste le matériel actif (athlète connecté, ou un athlète suivi côté coach).
+  async getGear(athleteId = this.user.id) {
+    const { data, error } = await sb.from("gear")
+      .select("id, type, name, brand, km, max_km, cat, price, notified, retired")
+      .eq("athlete_id", athleteId).eq("retired", false)
+      .order("created_at", { ascending: true });
+    if (error) { console.warn("getGear:", error.message); return []; }
+    return data ?? [];
+  },
+  // Ajoute un équipement. g = { type, name, brand?, km?, max_km?, cat?, price?, notified? }.
+  // cat : catégorie catalogue (daily/tempo/race/trail, chaussures uniquement).
+  async addGear(g) {
+    const { data, error } = await sb.from("gear")
+      .insert({ athlete_id: this.user.id, type: g.type, name: g.name,
+                brand: g.brand ?? null, km: g.km ?? 0, max_km: g.max_km ?? 1000,
+                cat: g.cat ?? null, price: g.price ?? null,
+                notified: g.notified ?? [] })
+      .select().single();
+    if (error) { console.warn("addGear:", error.message); return null; }
+    return data;
+  },
+  // Met à jour un équipement (km, notified, retired…). patch = { km?, notified?, … }.
+  async updateGear(id, patch) {
+    const { error } = await sb.from("gear").update(patch)
+      .eq("id", id).eq("athlete_id", this.user.id);
+    if (error) console.warn("updateGear:", error.message);
+    return !error;
+  },
+  // Archivage doux d'un équipement (retired=true : garde l'historique d'usure).
+  async retireGear(id) {
+    return await this.updateGear(id, { retired: true });
+  },
+  // Démarre l'onboarding Stripe Connect du COACH (pour facturer ses athlètes).
   async connectCoachStripe() {
     const { url } = await this._invoke("coach-connect", {});
     window.location.href = url;
@@ -409,6 +443,36 @@ export const PF = {
     if (athleteId) q = q.eq("user_id", athleteId);
     const { data } = await q;
     return data ?? [];
+  },
+  // Persiste un import manuel .TCX/.GPX (window.PFFit.parseFile → { summary, data }).
+  // Upsert sur (provider, provider_activity_id) : ré-importer le même fichier ne duplique pas.
+  async saveActivity(summary, data) {
+    const avgPowerPts = (data?.pts || []).filter((p) => p.pw > 0).map((p) => p.pw);
+    const avgPower = avgPowerPts.length
+      ? Math.round(avgPowerPts.reduce((a, b) => a + b, 0) / avgPowerPts.length)
+      : null;
+    const startTime = summary.date ? new Date(summary.date) : new Date();
+    const row = {
+      user_id: this.user.id,
+      provider: "upload",
+      provider_activity_id: `${summary.source}-${startTime.getTime()}-${Math.round((summary.dist || 0) * 1000)}`,
+      disc: summary.disc,
+      name: summary.title,
+      start_time: startTime.toISOString(),
+      duration_s: Math.round((summary.durMin || 0) * 60),
+      distance_m: Math.round((summary.dist || 0) * 1000),
+      elevation_m: summary.dplus ?? null,
+      avg_hr: summary.avgHr || null,
+      max_hr: summary.maxHr || null,
+      avg_power: avgPower,
+      avg_speed: summary.avgSpeed ?? null,
+      raw: data ?? null,
+    };
+    const { data: saved, error } = await sb.from("external_activities")
+      .upsert(row, { onConflict: "provider,provider_activity_id" })
+      .select().single();
+    if (error) { console.warn("saveActivity:", error.message); return null; }
+    return saved;
   },
 
   // -------- interne --------
