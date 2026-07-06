@@ -19,24 +19,41 @@ window.PF = PF;
 const A = () => window.__pf_app;   // raccourci vers le hook de l'app
 const TRIAL_DAYS = 14;             // durée de l'essai gratuit coach (jours)
 
+/* -------- échappement anti-XSS --------
+   L'app construit son UI via innerHTML (100+ points) sans échapper. Toute
+   donnée LIBRE saisie par un utilisateur (nom d'athlète, titre de séance,
+   note, nom de matériel/club/offre…) est donc un vecteur de XSS STOCKÉ :
+   un athlète mettant `<img src=x onerror=…>` dans son nom exécuterait du
+   code dans la session de SON COACH quand celui-ci ouvre son tableau de bord.
+   On neutralise à l'INGESTION : chaque champ texte libre venant de la base
+   est échappé ici, une fois, avant d'atteindre le moindre innerHTML. Un nom
+   normal (sans <>&"') est inchangé ; seuls les caractères d'injection le sont. */
+const esc = (s) => s == null ? s : String(s)
+  .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
+  .replaceAll('"', "&quot;").replaceAll("'", "&#39;");
+
 /* -------- petits utilitaires de mapping DB → formes de l'app -------- */
-const mapRecord  = (r) => ({ d: r.label, v: r.value, isNew: r.is_new });
-const mapVideo   = (v) => ({ id: v.id, disc: v.disc, title: v.title,
-  dur: v.duration, level: v.level, desc: v.description, tags: v.tags || [],
+const mapRecord  = (r) => ({ d: esc(r.label), v: esc(r.value), isNew: r.is_new });
+const mapVideo   = (v) => ({ id: v.id, disc: v.disc, title: esc(v.title),
+  dur: v.duration, level: esc(v.level), desc: esc(v.description), tags: (v.tags || []).map(esc),
   src: v.src || "", premium: !!v.is_premium });
 const mapRefs = (p) => p ? {
   ftp: p.ftp, pma: p.pma, cpBike: p.cp_bike, vma: p.vma, cv: p.cv,
   seuilRun: p.seuil_run, css: p.css, fcMax: p.fc_max, fcRepos: p.fc_repos,
 } : {};
-const mapSession = (s) => ({ id: s.id, disc: s.disc, title: s.title, dur: s.dur,
-  dist: s.dist, tss: s.tss, zone: s.zone, done: s.done, rpe: s.rpe,
+const mapSession = (s) => ({ id: s.id, disc: s.disc, title: esc(s.title), dur: s.dur,
+  dist: s.dist, tss: s.tss, zone: s.zone, done: s.done, rpe: s.rpe, note: esc(s.note),
   blocksV2: s.blocks && s.blocks.length ? { blocks: s.blocks } : undefined });
-const mapMember  = (m) => ({ id: m.id, name: m.display_name || "Athlète",
-  disc: m.disc || "tri", since: m.since || "", group: m.group_id });
-const mapGroup   = (g) => ({ id: g.id, name: g.name, color: g.color, desc: g.description });
-const mapCreneau = (c) => ({ id: c.id, disc: c.disc, title: c.title, day: c.day,
-  time: c.time, dur: c.dur, place: c.place, cap: c.cap, coach: c.coach,
+const mapMember  = (m) => ({ id: m.id, name: esc(m.display_name) || "Athlète",
+  disc: m.disc || "tri", since: esc(m.since) || "", group: m.group_id });
+const mapGroup   = (g) => ({ id: g.id, name: esc(g.name), color: g.color, desc: esc(g.description) });
+const mapCreneau = (c) => ({ id: c.id, disc: c.disc, title: esc(c.title), day: c.day,
+  time: c.time, dur: c.dur, place: esc(c.place), cap: c.cap, coach: esc(c.coach),
   price: Number(c.price) || 0, group: c.group_id, attendees: [] });
+const mapGear = (g) => ({ id: g.id, type: g.type, name: esc(g.name), brand: esc(g.brand) || "",
+  km: Number(g.km) || 0, max: Number(g.max_km) || 1000,
+  cat: g.cat || null, price: g.price != null ? Number(g.price) : null,
+  notified: g.notified || [] });
 
 /* ===========================================================================
  *  HYDRATATION — remplit les globales de l'app depuis Supabase
@@ -55,6 +72,15 @@ async function hydrate() {
   await section("records", async () => {
     const recs = await PF.getRecords(uid);
     if (recs.length) app.replaceArray(app.data.RECORDS, recs.map(mapRecord));
+    // Compte confirmé sans la moindre activité réelle (ni record, ni import) :
+    // on ne veut pas montrer les records/graphiques de démo comme si c'était
+    // les siens. S'il y a le moindre signal réel, on n'y touche pas.
+    const acts = await PF.getActivities(1, uid);
+    const hasActivity = recs.length > 0 || acts.length > 0;
+    if (!hasActivity) {
+      app.replaceArray(app.data.RECORDS, []);
+      app.setActivityState?.(false);
+    }
   });
 
   await section("checkin", async () => {
@@ -63,17 +89,28 @@ async function hydrate() {
       { sommeil: c.sommeil, fatigue: c.fatigue, motivation: c.motivation });
   });
 
+  await section("gear", async () => {
+    const items = await PF.getGear(uid);
+    // Set inconditionnel : un compte réel sans matériel voit la section vide,
+    // pas le matériel de démonstration présenté comme le sien.
+    app.setGear?.(items.map(mapGear));
+  });
+
+  let defaultAthleteId = null; // null = planifier pour soi-même (comportement historique)
+  await section("coachAthletes", async () => {
+    const rows = await PF.myAthletes();
+    const list = rows.map((r) => ({
+      id: r.athlete_id,
+      name: esc(r.profiles?.full_name || r.profiles?.email) || "Athlète",
+    }));
+    // Un coach avec des athlètes liés planifie par défaut pour le premier
+    // (plus utile que "pour soi-même" dans le cas d'usage réel).
+    if (PF.profile?.role === "coach" && list.length) defaultAthleteId = list[0].id;
+    app.setCoachAthletes?.(list, defaultAthleteId);
+  });
+
   await section("planning", async () => {
-    // Fenêtre large autour d'aujourd'hui (±4 semaines) pour couvrir la nav.
-    const today = new Date();
-    const from = new Date(today); from.setDate(from.getDate() - 28);
-    const to   = new Date(today); to.setDate(to.getDate() + 28);
-    const iso = (d) => d.toISOString().slice(0, 10);
-    const rows = await PF.getPlanning(uid, iso(from), iso(to));
-    app.clearObj(app.data.planning);
-    for (const s of rows) {
-      (app.data.planning[s.date] ||= []).push(mapSession(s));
-    }
+    await loadPlanningFor(defaultAthleteId);
   });
 
   await section("videos", async () => {
@@ -126,6 +163,10 @@ async function hydrate() {
     renderVideoGate({ role, videosOk });
   });
 
+  await section("aiAddon", async () => {
+    window.__pf_aiAddon = await PF.hasAiAddon();
+  });
+
   // Re-render complet avec les données fraîches.
   try {
     app.renderSidebar?.();
@@ -141,6 +182,32 @@ async function section(name, fn) {
   try { await fn(); }
   catch (e) { console.error(`[PF] hydrate ${name} échoué :`, e); }
 }
+
+// (Re)charge le planning ET le matériel d'un athlète donné (null = soi-même),
+// puis re-render. Utilisé au chargement ET quand le coach change d'athlète.
+async function loadPlanningFor(athleteId) {
+  const app = A();
+  const target = athleteId || PF.user.id;
+  const today = new Date();
+  const from = new Date(today); from.setDate(from.getDate() - 28);
+  const to   = new Date(today); to.setDate(to.getDate() + 28);
+  const iso = (d) => d.toISOString().slice(0, 10);
+  const [rows, gearRows] = await Promise.all([
+    PF.getPlanning(target, iso(from), iso(to)),
+    PF.getGear(target),
+  ]);
+  app.clearObj(app.data.planning);
+  for (const s of rows) {
+    (app.data.planning[s.date] ||= []).push(mapSession(s));
+  }
+  // Matériel de CET athlète — vide si rien de renseigné, jamais celui d'un autre.
+  app.setGear?.(gearRows.map(mapGear));
+  app.render?.();
+  app.renderSidebar?.();
+}
+window.__pf_loadPlanningFor = (athleteId) => {
+  loadPlanningFor(athleteId).catch((e) => console.error("[PF] loadPlanningFor échoué :", e));
+};
 
 /* ===========================================================================
  *  AUTH UI — overlay de connexion / inscription (thème sombre Sillance)
