@@ -14,8 +14,13 @@ import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-
 
 export type Provider = "strava" | "garmin" | "coros" | "polar" | "suunto" | "wahoo";
 
+// Origine autorisée pilotée par env (durci — voir _shared/cors.ts). Une seule
+// origine explicite, jamais '*'. Défaut = front GitHub Pages ; en prod, poser
+// CORS_ORIGIN sur le domaine réel.
+const ALLOWED_ORIGIN = Deno.env.get("CORS_ORIGIN") ?? "https://rowandgrv.github.io";
 export const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Origin": ALLOWED_ORIGIN,
+  "Vary": "Origin",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
 };
