@@ -123,3 +123,15 @@ export async function garminImportRecent(sb: SupabaseClient, conn: any): Promise
   await sb.from("device_connections").update({ last_sync_at: new Date().toISOString() }).eq("id", conn.id);
   return n;
 }
+
+/** Garde-fou anti-SSRF : n'autorise à puller QUE les callbackURL Garmin.
+ *  Le payload d'un webhook est non authentifié → un pirate pourrait y placer
+ *  une URL interne (169.254.169.254, localhost…). On exige https + hôte
+ *  officiel *.garmin.com avant tout fetch. */
+export function isGarminCallbackUrl(raw: string): boolean {
+  try {
+    const u = new URL(raw);
+    return u.protocol === "https:" &&
+      (u.hostname === "garmin.com" || u.hostname.endsWith(".garmin.com"));
+  } catch { return false; }
+}

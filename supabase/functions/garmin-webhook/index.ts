@@ -4,7 +4,7 @@
 //  On résout l'utilisateur par userId Garmin (= provider_user_id) et on upsert.
 // =============================================================================
 import { admin } from "../_shared/providers.ts";
-import { garminUpsertActivities, garminGet } from "../_shared/garmin.ts";
+import { garminUpsertActivities, garminGet, isGarminCallbackUrl } from "../_shared/garmin.ts";
 
 Deno.serve(async (req) => {
   if (req.method !== "POST") return new Response("ok");
@@ -34,7 +34,11 @@ async function ingest(payload: any) {
     if (!conn) continue;
 
     // PING : on récupère les données via la callbackURL signée.
-    const pings = list.filter((x) => x.callbackURL);
+    // ⚠️ SÉCURITÉ : le webhook n'est pas authentifié, donc callbackURL est une
+    // valeur NON DE CONFIANCE. On rejette toute URL hors *.garmin.com avant de
+    // fetch, sinon un pirate déclencherait une SSRF (métadonnées cloud, réseau
+    // interne) en forgeant un ping.
+    const pings = list.filter((x) => x.callbackURL && isGarminCallbackUrl(x.callbackURL));
     let activities = list.filter((x) => !x.callbackURL);
     for (const p of pings) {
       try {
