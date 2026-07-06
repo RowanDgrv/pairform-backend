@@ -126,7 +126,20 @@ export const PF = {
     if (error) { console.warn("athlete_has_videos:", error.message); return false; }
     return !!data;
   },
-  // Démarre l'onboarding Stripe Connect du COACH (pour facturer ses athlètes).
+  // ---- Consentement parental (membre mineur d'un club) -----------------------
+  // Enregistre le statut mineur + l'autorisation du représentant légal. Le
+  // gestionnaire du club atteste avoir recueilli l'autorisation ; on horodate.
+  async setParentalConsent(memberId, { is_minor, guardian_name, guardian_email, consent }) {
+    const patch = {
+      is_minor: !!is_minor,
+      guardian_name: is_minor ? (guardian_name || null) : null,
+      guardian_email: is_minor ? (guardian_email || null) : null,
+      guardian_consent_at: (is_minor && consent) ? new Date().toISOString() : null,
+    };
+    const { error } = await sb.from("club_members").update(patch).eq("id", memberId);
+    if (error) throw error;
+    return patch;
+  },
   // ---- Matériel : usure chaussures / vélos (table gear, RLS par athlète) ------
   // Liste le matériel actif (athlète connecté, ou un athlète suivi côté coach).
   async getGear(athleteId = this.user.id) {
