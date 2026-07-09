@@ -253,6 +253,32 @@ export const PF = {
       .select().single();
     if (error) throw error; return data;
   },
+  // ---- Notification du matin (récap séances + matériel) ----
+  // Préférences : heure d'envoi, fuseau, canal (email | push | both | none).
+  async getNotifPrefs() {
+    const { data } = await sb.from("notification_prefs")
+      .select("send_hour, send_minute, tz, channel").maybeSingle();
+    return data;
+  },
+  async saveNotifPrefs({ hour, minute, tz, channel }) {
+    const { error } = await sb.from("notification_prefs")
+      .upsert({ user_id: this.user.id, send_hour: hour, send_minute: minute ?? 0,
+                tz: tz || "Europe/Paris", channel, updated_at: new Date().toISOString() },
+              { onConflict: "user_id" });
+    if (error) throw error; return true;
+  },
+  // Abonnement Web Push du navigateur courant (un par appareil).
+  async savePushSubscription(subJson) {
+    const { error } = await sb.from("push_subscriptions")
+      .upsert({ user_id: this.user.id, endpoint: subJson.endpoint,
+                p256dh: subJson.keys?.p256dh, auth: subJson.keys?.auth,
+                ua: navigator.userAgent.slice(0, 200) },
+              { onConflict: "endpoint" });
+    if (error) throw error; return true;
+  },
+  async removePushSubscription(endpoint) {
+    await sb.from("push_subscriptions").delete().eq("endpoint", endpoint);
+  },
 
   // planning[date] -> séances de l'athlète sur une fenêtre de dates
   async getPlanning(athleteId, fromIso, toIso) {
