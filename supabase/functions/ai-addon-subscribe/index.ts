@@ -19,6 +19,9 @@ const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY")!, {
 const APP_URL = Deno.env.get("APP_URL") ?? "http://localhost:5500";
 const AI_PRICE_EUR = Number(Deno.env.get("AI_ADDON_PRICE_EUR") ?? "12");
 const AI_PRICE_ID = Deno.env.get("STRIPE_PRICE_AI"); // optionnel : Price fixe
+// Essai gratuit : carte enregistrée au checkout, débit automatique à la fin
+// de l'essai sauf résiliation (portail Stripe). 0 = pas d'essai.
+const AI_TRIAL_DAYS = Number(Deno.env.get("AI_ADDON_TRIAL_DAYS") ?? "14");
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -67,7 +70,12 @@ Deno.serve(async (req) => {
       mode: "subscription",
       customer: customerId,
       line_items: [line_item as Stripe.Checkout.SessionCreateParams.LineItem],
-      subscription_data: { metadata: { kind: "ai_addon", user_id: user.id } },
+      subscription_data: {
+        metadata: { kind: "ai_addon", user_id: user.id },
+        ...(AI_TRIAL_DAYS > 0 ? { trial_period_days: AI_TRIAL_DAYS } : {}),
+      },
+      // carte exigée même pendant l'essai → débit automatique à J+14 sans action
+      payment_method_collection: "always",
       allow_promotion_codes: true,
       success_url: `${APP_URL}/?ai=success`,
       cancel_url: `${APP_URL}/?ai=cancel`,
