@@ -245,13 +245,27 @@ export const PF = {
       .eq("athlete_id", this.user.id).eq("date", today).maybeSingle();
     return data;
   },
-  async saveCheckin({ sommeil, fatigue, motivation, readiness }) {
+  async saveCheckin({ sommeil, fatigue, motivation, readiness, poids, dispo, dispoNote }) {
     const today = new Date().toISOString().slice(0, 10);
-    const { data, error } = await sb.from("checkins")
-      .upsert({ athlete_id: this.user.id, date: today, sommeil, fatigue, motivation, readiness },
-              { onConflict: "athlete_id,date" })
-      .select().single();
+    const base = { athlete_id: this.user.id, date: today, sommeil, fatigue, motivation, readiness };
+    // dispo/poids : colonnes de la migration 0019 — si elle n'est pas encore
+    // déployée, on retombe sur le payload historique plutôt que d'échouer.
+    const full = { ...base, poids: poids ?? null, dispo: dispo ?? null, dispo_note: dispoNote ?? null };
+    let { data, error } = await sb.from("checkins")
+      .upsert(full, { onConflict: "athlete_id,date" }).select().single();
+    if (error) {
+      ({ data, error } = await sb.from("checkins")
+        .upsert(base, { onConflict: "athlete_id,date" }).select().single());
+    }
     if (error) throw error; return data;
+  },
+  // Check-ins du jour de plusieurs athlètes (roster coach — RLS "coach reads").
+  async rosterCheckins(athleteIds) {
+    if (!athleteIds?.length) return [];
+    const today = new Date().toISOString().slice(0, 10);
+    const { data } = await sb.from("checkins").select("*")
+      .in("athlete_id", athleteIds).eq("date", today);
+    return data ?? [];
   },
   // ---- Notification du matin (récap séances + matériel) ----
   // Préférences : heure d'envoi, fuseau, canal (email | push | both | none).

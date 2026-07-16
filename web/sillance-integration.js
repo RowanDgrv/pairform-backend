@@ -86,7 +86,10 @@ async function hydrate() {
   await section("checkin", async () => {
     const c = await PF.todayCheckin();
     if (c) app.assignObj(app.data.checkin,
-      { sommeil: c.sommeil, fatigue: c.fatigue, motivation: c.motivation });
+      { sommeil: c.sommeil, fatigue: c.fatigue, motivation: c.motivation,
+        // colonnes 0019 (poids/dispo) : absentes tant que la migration n'est pas déployée
+        ...(c.poids != null ? { poids: c.poids } : {}),
+        dispo: c.dispo || 'ok', dispoNote: c.dispo_note || '' });
   });
 
   await section("gear", async () => {
@@ -99,9 +102,20 @@ async function hydrate() {
   let defaultAthleteId = null; // null = planifier pour soi-même (comportement historique)
   await section("coachAthletes", async () => {
     const rows = await PF.myAthletes();
+    // Check-ins du jour du roster : forme + disponibilité (journal blessure)
+    // visibles dans le bandeau coach, le sélecteur et la table de suivi.
+    let ckByAth = {};
+    try {
+      const cks = await PF.rosterCheckins(rows.map((r) => r.athlete_id));
+      for (const c of cks) ckByAth[c.athlete_id] = {
+        sommeil: c.sommeil, fatigue: c.fatigue, motivation: c.motivation,
+        dispo: c.dispo || 'ok', dispoNote: c.dispo_note || '',
+      };
+    } catch (e) { console.warn("[PF] rosterCheckins :", e); }
     const list = rows.map((r) => ({
       id: r.athlete_id,
       name: esc(r.profiles?.full_name || r.profiles?.email) || "Athlète",
+      checkin: ckByAth[r.athlete_id] || null,
     }));
     // Un coach avec des athlètes liés planifie par défaut pour le premier
     // (plus utile que "pour soi-même" dans le cas d'usage réel).
@@ -120,7 +134,16 @@ async function hydrate() {
 
   await section("club", async () => {
     const clubs = await PF.myClubs();
-    if (!clubs.length) return;
+    if (!clubs.length) {
+      // Aucun club réel : ne pas laisser le club de démonstration (Muret Goat
+      // Squad et ses adhérents fictifs) visible comme si c'était le sien.
+      app.replaceArray(app.data.CLUB_ATHLETES, []);
+      app.replaceArray(app.data.CLUB_GROUPS, []);
+      app.replaceArray(app.data.CRENEAUX, []);
+      const el = document.getElementById("clubName");
+      if (el) el.textContent = "Mon club";
+      return;
+    }
     const club = clubs[0];
     window.__pf_clubId = club.id;   // exposé pour les écritures (création créneau)
     const [members, creneaux] = await Promise.all([
@@ -239,6 +262,9 @@ function injectStyles() {
   .pf-auth-card .switch{margin-top:14px;text-align:center;font-size:13px;color:#8a949e}
   .pf-auth-card .switch a{color:#46C2D8;cursor:pointer}
   .pf-auth-card .err{color:#ff6b81;font-size:12px;margin-top:10px;min-height:14px}
+  .pf-auth-card .pf-consent{display:flex;gap:8px;align-items:flex-start;margin:14px 0 2px;font-size:11.5px;line-height:1.4;color:#9aa3b2}
+  .pf-auth-card .pf-consent input{width:auto;margin:2px 0 0;flex-shrink:0}
+  .pf-auth-card .pf-consent a{color:#46C2D8}
   .vcard.vlocked .thumb{filter:grayscale(.45) brightness(.62)}
   .vlock{position:absolute;top:8px;right:8px;z-index:3;background:rgba(8,10,13,.72);
     color:#ffd23f;border-radius:99px;padding:3px 8px;font-size:12px;font-weight:700}
@@ -305,6 +331,7 @@ function renderAuth() {
     <label>Email</label><input id="pf-email" type="email" placeholder="toi@mail.com">
     <label>Mot de passe</label><input id="pf-pass" type="password" placeholder="••••••••">
     <div class="err" id="pf-err"></div>
+    ${isUp ? `<label class="pf-consent"><input type="checkbox" id="pf-consent"><span>J'accepte que Sillance traite mes données d'entraînement, y compris mes données de santé (check-ins, fréquence cardiaque), pour fournir le service. Voir la <a href="./legal.html#confidentialite" target="_blank" rel="noopener">politique de confidentialité</a>.</span></label>` : ``}
     <button class="primary" id="pf-go">${isUp ? "Créer mon compte" : "Se connecter"}</button>
     <div class="switch">${isUp
       ? `Déjà un compte ? <a id="pf-switch">Se connecter</a>`
@@ -325,6 +352,8 @@ async function submitAuth() {
   const password = document.getElementById("pf-pass").value;
   try {
     if (authMode === "signup") {
+      const consent = document.getElementById("pf-consent");
+      if (consent && !consent.checked) { err.textContent = "Merci d'accepter le traitement de tes données pour créer ton compte."; return; }
       const fullName = document.getElementById("pf-name").value.trim();
       await PF.signUp({ email, password, fullName, role: pickedRole });
       // Selon la config Supabase, une confirmation email peut être requise.
