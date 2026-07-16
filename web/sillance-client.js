@@ -324,9 +324,14 @@ export const PF = {
     }).select().single();
     if (error) throw error; return data;
   },
-  async markSessionDone(id, { done = true, rpe } = {}) {
-    const { data, error } = await sb.from("scheduled_sessions")
-      .update({ done, rpe }).eq("id", id).select().single();
+  async markSessionDone(id, { done = true, rpe, rpeMuscle } = {}) {
+    const payload = { done, rpe };
+    // rpe_muscle : colonne 0021 — repli gracieux si pas encore déployée.
+    const full = { ...payload, rpe_muscle: rpeMuscle ?? null };
+    let { data, error } = await sb.from("scheduled_sessions").update(full).eq("id", id).select().single();
+    if (error) {
+      ({ data, error } = await sb.from("scheduled_sessions").update(payload).eq("id", id).select().single());
+    }
     if (error) throw error; return data;
   },
   async deleteScheduled(id) {

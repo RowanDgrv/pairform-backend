@@ -42,7 +42,8 @@ const mapRefs = (p) => p ? {
   seuilRun: p.seuil_run, css: p.css, fcMax: p.fc_max, fcRepos: p.fc_repos,
 } : {};
 const mapSession = (s) => ({ id: s.id, disc: s.disc, title: esc(s.title), dur: s.dur,
-  dist: s.dist, tss: s.tss, zone: s.zone, done: s.done, rpe: s.rpe, note: esc(s.note),
+  dist: s.dist, tss: s.tss, zone: s.zone, done: s.done, rpe: s.rpe,
+  ...(s.rpe_muscle != null ? { rpeMuscle: s.rpe_muscle } : {}), note: esc(s.note),
   blocksV2: s.blocks && s.blocks.length ? { blocks: s.blocks } : undefined });
 const mapMember  = (m) => ({ id: m.id, name: esc(m.display_name) || "Athlète",
   disc: m.disc || "tri", since: esc(m.since) || "", group: m.group_id });
