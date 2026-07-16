@@ -228,6 +228,21 @@ export const PF = {
     if (error) throw error; return data;
   },
 
+  // -------- ZONES DE TRAVAIL PERSONNALISÉES (coach définit, athlète lit) --------
+  // zones = { modelKey: [[nom, borneBasse, borneHaute], ...] } (migration 0020)
+  async getAthleteZones(athleteId = this.user.id) {
+    const { data } = await sb.from("athlete_zones").select("zones")
+      .eq("athlete_id", athleteId).maybeSingle();
+    return data ? data.zones : null;
+  },
+  async saveAthleteZones(athleteId, zones) {
+    const { error } = await sb.from("athlete_zones")
+      .upsert({ athlete_id: athleteId || this.user.id, zones: zones || {},
+                updated_by: this.user.id, updated_at: new Date().toISOString() },
+              { onConflict: "athlete_id" });
+    if (error) throw error;
+  },
+
   async getRecords(athleteId = this.user.id) {
     const { data } = await sb.from("records").select("*").eq("athlete_id", athleteId)
       .order("recorded_at", { ascending: false });

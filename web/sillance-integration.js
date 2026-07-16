@@ -99,6 +99,14 @@ async function hydrate() {
     app.setGear?.(items.map(mapGear));
   });
 
+  await section("zones", async () => {
+    // zones de travail perso de l'utilisateur (table 0020) — clé = son id.
+    try {
+      const z = await PF.getAthleteZones(uid);
+      app.setAthleteZones?.(uid, z || null);
+    } catch (e) { console.warn("[PF] getAthleteZones :", e); }
+  });
+
   let defaultAthleteId = null; // null = planifier pour soi-même (comportement historique)
   await section("coachAthletes", async () => {
     const rows = await PF.myAthletes();
@@ -215,9 +223,10 @@ async function loadPlanningFor(athleteId) {
   const from = new Date(today); from.setDate(from.getDate() - 28);
   const to   = new Date(today); to.setDate(to.getDate() + 28);
   const iso = (d) => d.toISOString().slice(0, 10);
-  const [rows, gearRows] = await Promise.all([
+  const [rows, gearRows, zones] = await Promise.all([
     PF.getPlanning(target, iso(from), iso(to)),
     PF.getGear(target),
+    PF.getAthleteZones(target).catch((e) => { console.warn("[PF] getAthleteZones :", e); return null; }),
   ]);
   app.clearObj(app.data.planning);
   for (const s of rows) {
@@ -225,6 +234,8 @@ async function loadPlanningFor(athleteId) {
   }
   // Matériel de CET athlète — vide si rien de renseigné, jamais celui d'un autre.
   app.setGear?.(gearRows.map(mapGear));
+  // Zones de travail perso de CET athlète (utilisées par le builder).
+  app.setAthleteZones?.(target, zones || null);
   app.render?.();
   app.renderSidebar?.();
 }
