@@ -90,6 +90,7 @@ async function hydrate() {
       { sommeil: c.sommeil, fatigue: c.fatigue, motivation: c.motivation,
         // colonnes 0019 (poids/dispo) : absentes tant que la migration n'est pas déployée
         ...(c.poids != null ? { poids: c.poids } : {}),
+        ...(c.hrv != null ? { hrv: c.hrv } : {}),
         dispo: c.dispo || 'ok', dispoNote: c.dispo_note || '' });
   });
 
@@ -119,6 +120,7 @@ async function hydrate() {
       for (const c of cks) ckByAth[c.athlete_id] = {
         sommeil: c.sommeil, fatigue: c.fatigue, motivation: c.motivation,
         dispo: c.dispo || 'ok', dispoNote: c.dispo_note || '',
+        ...(c.hrv != null ? { hrv: c.hrv } : {}),
       };
     } catch (e) { console.warn("[PF] rosterCheckins :", e); }
     const list = rows.map((r) => ({

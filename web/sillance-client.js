@@ -260,12 +260,12 @@ export const PF = {
       .eq("athlete_id", this.user.id).eq("date", today).maybeSingle();
     return data;
   },
-  async saveCheckin({ sommeil, fatigue, motivation, readiness, poids, dispo, dispoNote }) {
+  async saveCheckin({ sommeil, fatigue, motivation, readiness, poids, dispo, dispoNote, hrv }) {
     const today = new Date().toISOString().slice(0, 10);
     const base = { athlete_id: this.user.id, date: today, sommeil, fatigue, motivation, readiness };
-    // dispo/poids : colonnes de la migration 0019 — si elle n'est pas encore
-    // déployée, on retombe sur le payload historique plutôt que d'échouer.
-    const full = { ...base, poids: poids ?? null, dispo: dispo ?? null, dispo_note: dispoNote ?? null };
+    // dispo/poids (0019) + hrv (0022) : si pas encore déployées, on retombe sur
+    // le payload historique plutôt que d'échouer.
+    const full = { ...base, poids: poids ?? null, dispo: dispo ?? null, dispo_note: dispoNote ?? null, hrv: hrv ?? null };
     let { data, error } = await sb.from("checkins")
       .upsert(full, { onConflict: "athlete_id,date" }).select().single();
     if (error) {
