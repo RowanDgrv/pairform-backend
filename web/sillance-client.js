@@ -260,12 +260,13 @@ export const PF = {
       .eq("athlete_id", this.user.id).eq("date", today).maybeSingle();
     return data;
   },
-  async saveCheckin({ sommeil, fatigue, motivation, readiness, poids, dispo, dispoNote, hrv }) {
+  async saveCheckin({ sommeil, fatigue, motivation, readiness, poids, dispo, dispoNote, hrv, cyclePhase, cycleDay }) {
     const today = new Date().toISOString().slice(0, 10);
     const base = { athlete_id: this.user.id, date: today, sommeil, fatigue, motivation, readiness };
-    // dispo/poids (0019) + hrv (0022) : si pas encore déployées, on retombe sur
-    // le payload historique plutôt que d'échouer.
-    const full = { ...base, poids: poids ?? null, dispo: dispo ?? null, dispo_note: dispoNote ?? null, hrv: hrv ?? null };
+    // dispo/poids (0019) + hrv (0022) + cycle (0023) : si pas encore déployées,
+    // on retombe sur le payload historique plutôt que d'échouer.
+    const full = { ...base, poids: poids ?? null, dispo: dispo ?? null, dispo_note: dispoNote ?? null, hrv: hrv ?? null,
+                   cycle_phase: cyclePhase ?? null, cycle_day: cycleDay ?? null };
     let { data, error } = await sb.from("checkins")
       .upsert(full, { onConflict: "athlete_id,date" }).select().single();
     if (error) {

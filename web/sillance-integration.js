@@ -91,6 +91,7 @@ async function hydrate() {
         // colonnes 0019 (poids/dispo) : absentes tant que la migration n'est pas déployée
         ...(c.poids != null ? { poids: c.poids } : {}),
         ...(c.hrv != null ? { hrv: c.hrv } : {}),
+        ...(c.cycle_phase ? { cyclePhase: c.cycle_phase, cycleDay: c.cycle_day } : {}),
         dispo: c.dispo || 'ok', dispoNote: c.dispo_note || '' });
   });
 
@@ -121,6 +122,7 @@ async function hydrate() {
         sommeil: c.sommeil, fatigue: c.fatigue, motivation: c.motivation,
         dispo: c.dispo || 'ok', dispoNote: c.dispo_note || '',
         ...(c.hrv != null ? { hrv: c.hrv } : {}),
+        ...(c.cycle_phase ? { cyclePhase: c.cycle_phase, cycleDay: c.cycle_day } : {}),
       };
     } catch (e) { console.warn("[PF] rosterCheckins :", e); }
     const list = rows.map((r) => ({
