@@ -215,6 +215,10 @@ export const PF = {
     const { data } = await sb.from("coaching_subscriptions").select("*");
     return data ?? [];
   },
+  // Factures Stripe des athlètes qui paient CE coach (montant, athlète, PDF).
+  async getCoachInvoices() {
+    return await this._invoke("coach-invoices", {});
+  },
 
   // -------- DONNÉES ATHLÈTE --------
   async getAthleteRefs() {
