@@ -119,6 +119,7 @@ async function upsertSubscription(sub: Stripe.Subscription) {
   const row = {
     user_id: userId,
     plan,
+    tier: sub.metadata?.tier ? Number(sub.metadata.tier) : null,
     stripe_customer_id: sub.customer as string,
     stripe_subscription_id: sub.id,
     price_id: sub.items.data[0]?.price?.id ?? null,

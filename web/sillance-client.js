@@ -65,9 +65,11 @@ export const PF = {
   },
 
   // -------- ABONNEMENT (Stripe) --------
-  // plan ∈ 'coach' | 'athlete' | 'club'
-  async startCheckout(plan) {
-    const { url } = await this._invoke("stripe-checkout", { plan });
+  // plan ∈ 'coach' | 'athlete' | 'club'. tier (coach uniquement) ∈ 1|2|3
+  // = 1-10 / 11-30 / 31+ athlètes coachés (auto-déclaré).
+  async startCheckout(plan, tier) {
+    const body = tier ? { plan, tier } : { plan };
+    const { url } = await this._invoke("stripe-checkout", body);
     window.location.href = url;
   },
   async openBillingPortal() {
