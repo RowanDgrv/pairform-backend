@@ -64,6 +64,15 @@ async function hydrate() {
   if (!app) { console.warn("[PF] hook __pf_app absent — app pas prête"); return; }
   const uid = PF.user.id;
 
+  // Compte réel = un seul rôle réel : verrouille les 2 autres vues (Coach/
+  // Athlète/Club) et bascule sur la sienne. Sans ça, un vrai utilisateur
+  // pouvait cliquer librement sur les 3 portes — pensées pour la démo/preview
+  // publique, pas pour un compte connecté.
+  if (typeof window.__pf_lockModes === "function" && PF.profile?.role) {
+    const realMode = PF.profile.role === "club_admin" ? "club" : PF.profile.role;
+    window.__pf_lockModes(realMode);
+  }
+
   // Chaque section est isolée : une erreur ne bloque pas les autres.
   await section("refs", async () => {
     const refs = await PF.getAthleteRefs();

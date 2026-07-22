@@ -78,7 +78,9 @@
   // toujours celle-ci qui fait foi pour avancer dans le buffer).
   const FIT_BASE_SIZE = { 0:1,1:1,2:1,3:1,4:1,5:1,6:1,7:1,0x83:2,0x84:2,0x85:4,0x86:4,0x87:8,0x88:4,0x89:8,0x0A:1,0x8B:2,0x8C:4,0x0D:1,0x8E:8,0x8F:8,0x90:8 };
   // Champs du message "record" (global msg 20) qu'on extrait.
-  const REC_FIELDS = { 253:'timestamp', 0:'lat', 1:'lon', 2:'alt', 78:'ealt', 3:'hr', 4:'cad', 5:'dist', 6:'spd', 73:'espd', 7:'pw' };
+  // 85=step_length (dynamiques de course, présent seulement sur les montres
+  // avec capteur RD type Coros/Garmin — jamais inventé si absent du fichier).
+  const REC_FIELDS = { 253:'timestamp', 0:'lat', 1:'lon', 2:'alt', 78:'ealt', 3:'hr', 4:'cad', 5:'dist', 6:'spd', 73:'espd', 7:'pw', 85:'steplen' };
 
   function readFitArrayBuffer(buf) {
     const view = new DataView(buf);
@@ -191,6 +193,7 @@
       if (rec.dist === INVALID32) rec.dist = null;
       if (rec.lat === INVALID_LAT || rec.lat === -INVALID_LAT - 1) rec.lat = null;
       if (rec.lon === INVALID_LAT || rec.lon === -INVALID_LAT - 1) rec.lon = null;
+      if (rec.steplen === INVALID16) rec.steplen = null;
 
       if (def.globalMsgNum === 0 && rec.timestamp == null) { /* file_id, rien à faire */ }
       if (def.globalMsgNum === 20) {
@@ -209,6 +212,10 @@
           cad: (rec.cad != null && rec.cad < 255) ? rec.cad : 0,
           pw: (rec.pw != null && rec.pw < 65535) ? rec.pw : 0,
           spdMs: (spd != null && spd < 100) ? spd : null,
+          // Longueur de foulée (m) — champ FIT 85 (uint16, échelle 10 → mm),
+          // uniquement présent si la montre a un capteur de dynamiques de
+          // course (ex. Coros/Garmin RD). Jamais recalculée ni estimée.
+          stepLen: rec.steplen != null ? rec.steplen / 10000 : null,
         });
       }
     }
@@ -379,6 +386,7 @@
       const pt = {
         t: tMin, sp, hr: r.hr || 0, alt: r.alt != null ? r.alt : (prev ? prev.alt : 0),
         grade, gap, pw: r.pw || 0, cad: r.cad || 0, _sp: sp, _cum: cumKm,
+        stepLen: r.stepLen != null ? r.stepLen : 0,
       };
       pts.push(pt);
       prev = { ...r, _sp: sp, distM: r.distM, alt: r.alt != null ? r.alt : (prev ? prev.alt : null) };
