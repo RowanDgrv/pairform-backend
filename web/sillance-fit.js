@@ -1,14 +1,19 @@
 /* ============================================================
-   Sillance — Import d'activités .TCX / .GPX  (window.PFFit)
+   Sillance — Import d'activités .TCX / .GPX / .FIT  (window.PFFit)
    ------------------------------------------------------------
    Convertit un fichier exporté d'une montre (Garmin, Coros, Polar…)
    en la MÊME structure que genSessionData() de l'app, afin que tout
    le modal d'analyse (vitesse, FC, altitude, puissance, DÉCOUPLAGE,
    ASSISTANT IA) fonctionne sur des données RÉELLES.
 
-   Choix MVP : .TCX et .GPX (XML, zéro dépendance, parse via DOMParser).
-   → couvre les exports Garmin Connect / COROS / Strava sans homologation.
-   .FIT (binaire) viendra avec une lib dédiée (fit-file-parser).
+   .TCX/.GPX : XML, zéro dépendance, parse via DOMParser.
+   .FIT : binaire, parseur maison zéro dépendance (parseFitArrayBuffer).
+   Robustesse volontaire : on avance TOUJOURS de la taille déclarée par
+   chaque définition de champ, sans jamais valider taille/type — un vrai
+   export (testé sur COROS PACE 2 via l'app iDO) contient des champs
+   développeur non standards qui font planter des libs strictes (dont
+   la référence Python `fitparse`) ; ignorer ce qu'on ne reconnaît pas
+   au lieu de le valider est ce qui rend ce parseur plus tolérant.
 
    API :
      PFFit.parse(text, filename, opts)  -> { ok, error?, summary, data }
@@ -19,14 +24,196 @@
   "use strict";
 
   const NEUTRAL_COND = { temp: 15, humidity: 50, wind: 0, windHead: false };
+  const FIT_EPOCH_OFFSET = 631065600; // secondes entre 1970-01-01 et 1989-12-31 (epoch FIT)
 
   function parseFile(file, opts) {
+    const name = (file.name || "").toLowerCase();
+    if (/\.fit$/.test(name)) {
+      return new Promise((resolve) => {
+        const r = new FileReader();
+        r.onload = () => {
+          try {
+            const { raw, disc } = readFitArrayBuffer(r.result);
+            resolve(finishParse(raw, disc, [], opts, "FIT"));
+          } catch (e) {
+            resolve({ ok: false, error: "Fichier .FIT illisible : " + (e && e.message ? e.message : e) });
+          }
+        };
+        r.onerror = () => resolve({ ok: false, error: "Lecture du fichier impossible." });
+        r.readAsArrayBuffer(file);
+      });
+    }
     return new Promise((resolve) => {
       const r = new FileReader();
       r.onload = () => resolve(parse(String(r.result || ""), file.name || "", opts));
       r.onerror = () => resolve({ ok: false, error: "Lecture du fichier impossible." });
       r.readAsText(file);
     });
+  }
+
+  function finishParse(raw, disc, lapsRaw, opts, source) {
+    if (disc == null) disc = "run";
+    if (!raw || raw.length < 4) return { ok: false, error: "Pas assez de points GPS/capteur dans le fichier." };
+    const data = buildData(raw, disc, lapsRaw, opts);
+    const summary = {
+      provider: "upload",
+      source,
+      disc,
+      title: titleFor(disc, data),
+      date: raw[0].time ? new Date(raw[0].time) : null,
+      durMin: Math.round(data.pts[data.pts.length - 1].t),
+      dist: +data.dist.toFixed(2),
+      avgHr: data.avgHr, maxHr: data.maxHr,
+      avgSpeed: +data.avgSpeed.toFixed(2),
+      dplus: data.dplus,
+      hasPower: data.pts.some((p) => p.pw > 0),
+      hasHr: data.pts.some((p) => p.hr > 0),
+    };
+    return { ok: true, summary, data };
+  }
+
+  /* ---------- FIT (binaire) ---------- */
+  // Taille en octets par base type FIT (table officielle, pour LIRE les champs
+  // qu'on reconnaît — on ne s'en sert JAMAIS pour valider la taille déclarée,
+  // toujours celle-ci qui fait foi pour avancer dans le buffer).
+  const FIT_BASE_SIZE = { 0:1,1:1,2:1,3:1,4:1,5:1,6:1,7:1,0x83:2,0x84:2,0x85:4,0x86:4,0x87:8,0x88:4,0x89:8,0x0A:1,0x8B:2,0x8C:4,0x0D:1,0x8E:8,0x8F:8,0x90:8 };
+  // Champs du message "record" (global msg 20) qu'on extrait.
+  const REC_FIELDS = { 253:'timestamp', 0:'lat', 1:'lon', 2:'alt', 78:'ealt', 3:'hr', 4:'cad', 5:'dist', 6:'spd', 73:'espd', 7:'pw' };
+
+  function readFitArrayBuffer(buf) {
+    const view = new DataView(buf);
+    const bytes = new Uint8Array(buf);
+    if (bytes.length < 14 || String.fromCharCode(bytes[8], bytes[9], bytes[10], bytes[11]) !== ".FIT") {
+      throw new Error("signature .FIT absente (fichier corrompu ou mauvais format)");
+    }
+    const headerSize = bytes[0];
+    const dataSize = view.getUint32(4, true);
+    const end = Math.min(bytes.length, headerSize + dataSize);
+    let offset = headerSize;
+    const localDefs = {};
+    const raw = [];
+    let lastTimestamp = null; // secondes FIT, pour les en-têtes "compressed timestamp"
+    let sportMsg = null;
+
+    function readField(sz, baseType, littleEndian) {
+      let v;
+      if (sz === FIT_BASE_SIZE[baseType]) {
+        switch (baseType) {
+          case 0x83: v = view.getInt16(offset, littleEndian); break;
+          case 0x84: v = view.getUint16(offset, littleEndian); break;
+          case 0x85: v = view.getInt32(offset, littleEndian); break;
+          case 0x86: v = view.getUint32(offset, littleEndian); break;
+          case 0x88: v = view.getFloat32(offset, littleEndian); break;
+          case 0x89: v = view.getFloat64(offset, littleEndian); break;
+          case 1: v = view.getInt8(offset); break;
+          default: v = view.getUint8(offset);
+        }
+      } else {
+        v = null; // taille inattendue pour ce type : on ne décode pas, mais on avance quand même
+      }
+      offset += sz;
+      return v;
+    }
+
+    while (offset < end) {
+      const header = bytes[offset]; offset += 1;
+      let localType, def, isDefinition = false, tsOffset = null;
+      if (header & 0x80) { // compressed timestamp header
+        localType = (header >> 5) & 0x3;
+        tsOffset = header & 0x1F;
+      } else {
+        isDefinition = !!(header & 0x40);
+        localType = header & 0xF;
+      }
+
+      if (isDefinition) {
+        // Une définition plausible a peu de champs, de taille raisonnable.
+        // Un fichier réel (COROS via iDO observé) contient un champ développeur
+        // mal déclaré plus loin dans le flux ; le détecter ICI et arrêter
+        // proprement (on garde les points déjà lus) vaut mieux que continuer
+        // à lire des octets désormais désynchronisés comme si de rien n'était.
+        if (offset + 5 > end) break;
+        offset += 1; // reserved
+        const arch = bytes[offset]; offset += 1;
+        const le = arch === 0;
+        const globalMsgNum = view.getUint16(offset, le); offset += 2;
+        const numFields = bytes[offset]; offset += 1;
+        if (numFields > 40 || offset + numFields * 3 > end) break;
+        const fields = [];
+        let fieldsOk = true;
+        for (let i = 0; i < numFields; i++) {
+          const size = bytes[offset + 1];
+          if (size === 0 || size > 32) { fieldsOk = false; break; }
+          fields.push({ num: bytes[offset], size, type: bytes[offset + 2] });
+          offset += 3;
+        }
+        if (!fieldsOk) break;
+        let devFields = [];
+        if (header & 0x20) { // has developer data
+          if (offset + 1 > end) break;
+          const numDev = bytes[offset]; offset += 1;
+          if (numDev > 40 || offset + numDev * 3 > end) break;
+          for (let i = 0; i < numDev; i++) {
+            const size = bytes[offset + 1];
+            if (size === 0 || size > 32) { i = numDev; break; }
+            devFields.push({ size }); offset += 3;
+          }
+        }
+        localDefs[localType] = { globalMsgNum, fields, devFields, le };
+        continue;
+      }
+
+      def = localDefs[localType];
+      if (!def) break; // message inconnu sans définition préalable : on ne peut pas avancer en sécurité
+
+      if (tsOffset != null && lastTimestamp != null) {
+        let ts = (lastTimestamp & ~0x1F) | tsOffset;
+        if (ts < lastTimestamp) ts += 0x20;
+        lastTimestamp = ts;
+      }
+
+      const rec = {};
+      for (const f of def.fields) {
+        const name = def.globalMsgNum === 20 ? REC_FIELDS[f.num] : null;
+        if (name) rec[name] = readField(f.size, f.type, def.le);
+        else offset += f.size; // champ non reconnu : on saute sans décoder
+      }
+      for (const df of def.devFields) offset += df.size; // champs développeur : toujours ignorés
+
+      // Valeurs "invalid" FIT (sentinelles par taille de champ) : à traiter
+      // comme absentes AVANT tout calcul d'échelle, sinon 0xFFFF (capteur
+      // muet un instant) devient une altitude de 12 607 m ou 235 km/h.
+      const INVALID16 = 0xFFFF, INVALID32 = 0xFFFFFFFF, INVALID_LAT = 0x7FFFFFFF;
+      if (rec.ealt === INVALID32) rec.ealt = null;
+      if (rec.alt === INVALID16) rec.alt = null;
+      if (rec.espd === INVALID32) rec.espd = null;
+      if (rec.spd === INVALID16) rec.spd = null;
+      if (rec.dist === INVALID32) rec.dist = null;
+      if (rec.lat === INVALID_LAT || rec.lat === -INVALID_LAT - 1) rec.lat = null;
+      if (rec.lon === INVALID_LAT || rec.lon === -INVALID_LAT - 1) rec.lon = null;
+
+      if (def.globalMsgNum === 0 && rec.timestamp == null) { /* file_id, rien à faire */ }
+      if (def.globalMsgNum === 20) {
+        if (rec.timestamp != null) lastTimestamp = rec.timestamp;
+        const ts = rec.timestamp != null ? rec.timestamp : lastTimestamp;
+        if (ts == null) continue;
+        const alt = rec.ealt != null ? rec.ealt / 5 - 500 : (rec.alt != null ? rec.alt / 5 - 500 : null);
+        const spd = rec.espd != null ? rec.espd / 1000 : (rec.spd != null ? rec.spd / 1000 : null);
+        raw.push({
+          time: (ts + FIT_EPOCH_OFFSET) * 1000,
+          lat: rec.lat != null ? rec.lat * (180 / 2147483648) : null,
+          lon: rec.lon != null ? rec.lon * (180 / 2147483648) : null,
+          alt: (alt != null && alt > -500) ? alt : null,
+          distM: rec.dist != null ? rec.dist / 100 : null,
+          hr: (rec.hr != null && rec.hr < 255) ? rec.hr : 0,
+          cad: (rec.cad != null && rec.cad < 255) ? rec.cad : 0,
+          pw: (rec.pw != null && rec.pw < 65535) ? rec.pw : 0,
+          spdMs: (spd != null && spd < 100) ? spd : null,
+        });
+      }
+    }
+    if (!raw.length) throw new Error("aucun point d'activité (message 'record') trouvé dans le fichier");
+    return { raw, disc: sportMsg || "run" };
   }
 
   function parse(text, filename, opts) {
