@@ -19,6 +19,18 @@ window.PF = PF;
 const A = () => window.__pf_app;   // raccourci vers le hook de l'app
 const TRIAL_DAYS = 14;             // durée de l'essai gratuit coach (jours)
 
+/* -------- mur de connexion (site officiel) --------
+   La démo (sillance-app.html sans paramètre) ne change pas : connexion via
+   le badge ☁︎, optionnelle, dismissible. Depuis la landing, le bouton
+   "Connexion" ajoute ?login=1(&role=coach|club) → l'app ouvre directement
+   l'overlay d'auth, IMPOSSIBLE à fermer sans se connecter (pas de démo
+   visible derrière). L'inscription "Athlète" en libre-service reste
+   volontairement absente de ce mur — un athlète rejoint via le lien
+   d'invitation de son coach (?invite=...), pas en s'inscrivant seul. */
+const gateParams = new URLSearchParams(location.search);
+const gateMode = gateParams.get("login") === "1";
+const gateRoleParam = gateParams.get("role"); // 'coach' | 'club'
+
 /* -------- échappement anti-XSS --------
    L'app construit son UI via innerHTML (100+ points) sans échapper. Toute
    donnée LIBRE saisie par un utilisateur (nom d'athlète, titre de séance,
@@ -322,11 +334,23 @@ function setCloudBadge(connected) {
   b.textContent = connected ? `☁︎ ${PF.profile?.full_name || "Connecté"}` : "☁︎ Se connecter";
 }
 
-let authMode = "signin";
-let pickedRole = "athlete";
+let authMode = gateMode ? "signup" : "signin";
+let pickedRole = gateMode
+  ? (gateRoleParam === "club" ? "club_admin" : "coach")
+  : "athlete";
+let hardGate = false;
 
-function openAuth() { injectAuthOverlay(); document.getElementById("pf-auth-overlay").classList.add("open"); }
-function closeAuth() { document.getElementById("pf-auth-overlay")?.classList.remove("open"); }
+function openAuth(hard = false) {
+  hardGate = hard;
+  injectAuthOverlay();
+  document.getElementById("pf-auth-overlay").classList.add("open");
+  if (hard) document.body.style.overflow = "hidden";
+}
+function closeAuth(force = false) {
+  if (hardGate && !force) return;   // mur bloquant : pas de fermeture sans connexion
+  document.getElementById("pf-auth-overlay")?.classList.remove("open");
+  document.body.style.overflow = "";
+}
 
 function injectAuthOverlay() {
   if (document.getElementById("pf-auth-overlay")) { renderAuth(); return; }
@@ -350,7 +374,7 @@ function renderAuth() {
       <label>Je suis…</label>
       <div class="row-roles">
         <div class="role" data-role="coach">Coach</div>
-        <div class="role" data-role="athlete">Athlète</div>
+        ${hardGate ? `` : `<div class="role" data-role="athlete">Athlète</div>`}
         <div class="role" data-role="club_admin">Club</div>
       </div>` : ``}
     <label>Email</label><input id="pf-email" type="email" placeholder="toi@mail.com">
@@ -387,7 +411,7 @@ async function submitAuth() {
     } else {
       await PF.signIn({ email, password });
     }
-    closeAuth();
+    closeAuth(true);
     await onLoggedIn();
   } catch (e) {
     err.textContent = e?.message || "Erreur de connexion.";
@@ -523,6 +547,9 @@ async function onLoggedIn() {
     await PF.init();
     if (PF.user) {
       await onLoggedIn();            // session existante → on hydrate
+    } else if (gateMode) {
+      setCloudBadge(false);
+      openAuth(true);                // "Connexion" landing → mur bloquant, pas de démo visible
     } else {
       setCloudBadge(false);         // sinon démo intacte + bouton de connexion
     }
