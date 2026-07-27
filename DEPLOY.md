@@ -81,7 +81,7 @@ supabase secrets set --env-file ./.env
 supabase functions deploy stripe-checkout stripe-portal creneau-checkout \
   club-subscribe club-connect coach-connect coach-subscribe \
   invite-athlete accept-invite video-url \
-  device-connect device-sync device-disconnect
+  device-connect device-sync device-disconnect strava-activity-streams
 
 # Functions appelées par un tiers (pas de JWT : callbacks OAuth + webhooks) :
 supabase functions deploy stripe-webhook         --no-verify-jwt
@@ -162,6 +162,7 @@ conservent le payload brut dans `external_activities.raw`).
 | garmin-webhook | ❌ | push/ping d'activités Garmin |
 | device-sync | ✅ | import manuel (Strava/Coros/Garmin) |
 | device-disconnect | ✅ | délie un compte + révoque le jeton |
+| strava-activity-streams | ✅ | détail seconde-par-seconde (GPS/FC/allure/puissance) d'une activité Strava, à la demande + cache |
 
 ## TODO — facturation club (à durcir avant la prod)
 À traiter avant d'ouvrir les paiements club à de vrais clubs (cf. `club-subscribe`) :

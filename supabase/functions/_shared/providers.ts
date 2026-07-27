@@ -178,6 +178,62 @@ export async function stravaValidToken(sb: SupabaseClient, conn: any): Promise<s
   return t.access_token;
 }
 
+/** Détail d'une activité Strava (laps, start_date…). */
+export async function stravaFetchActivityDetail(token: string, activityId: string): Promise<any> {
+  const res = await fetch(`https://www.strava.com/api/v3/activities/${activityId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error(`Strava activity detail: ${res.status} ${await res.text()}`);
+  return res.json();
+}
+
+/** Séries temporelles brutes d'une activité Strava (GPS/FC/allure/puissance point par point). */
+export async function stravaFetchStreams(token: string, activityId: string): Promise<any> {
+  const keys = "time,latlng,distance,altitude,velocity_smooth,heartrate,cadence,watts";
+  const res = await fetch(
+    `https://www.strava.com/api/v3/activities/${activityId}/streams?keys=${keys}&key_by_type=true`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  if (!res.ok) throw new Error(`Strava streams: ${res.status} ${await res.text()}`);
+  return res.json();
+}
+
+/** Zippe les séries parallèles Strava (`key_by_type`) en points `{time,lat,lon,alt,
+ *  distM,hr,cad,pw,spdMs,stepLen}` — même forme que le parseur .FIT (sillance-fit.js),
+ *  pour rejouer TEL QUEL le même modal d'analyse (découplage, IA, comparateur…). */
+export function normalizeStravaStreams(detail: any, streams: any, disc: string | null) {
+  const t0 = new Date(detail?.start_date ?? detail?.start_date_local ?? Date.now()).getTime();
+  const time = streams?.time?.data ?? [];
+  const latlng = streams?.latlng?.data ?? [];
+  const dist = streams?.distance?.data ?? [];
+  const alt = streams?.altitude?.data ?? [];
+  const vel = streams?.velocity_smooth?.data ?? [];
+  const hr = streams?.heartrate?.data ?? [];
+  const cadRaw = streams?.cadence?.data ?? [];
+  const watts = streams?.watts?.data ?? [];
+  // Convention connue de l'API Strava : la cadence course est comptée sur UNE
+  // jambe (pas/min d'un pied) — on double pour retomber sur le pas/min total
+  // attendu par l'app (même unité que les montres). Le vélo reste en rpm brut.
+  const cadMul = disc === "run" ? 2 : 1;
+  const n = time.length;
+  const pts = [];
+  for (let i = 0; i < n; i++) {
+    pts.push({
+      time: t0 + (time[i] ?? 0) * 1000,
+      lat: latlng[i]?.[0] ?? null,
+      lon: latlng[i]?.[1] ?? null,
+      alt: alt[i] ?? null,
+      distM: dist[i] ?? null,
+      hr: hr[i] ?? 0,
+      cad: cadRaw[i] != null ? Math.round(cadRaw[i] * cadMul) : 0,
+      pw: watts[i] ?? 0,
+      spdMs: vel[i] ?? null,
+      stepLen: null,
+    });
+  }
+  return pts;
+}
+
 /** Importe les N dernières activités Strava d'une connexion. Renvoie le nombre. */
 export async function stravaImportRecent(sb: SupabaseClient, conn: any, perPage = 30): Promise<number> {
   const token = await stravaValidToken(sb, conn);

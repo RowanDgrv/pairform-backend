@@ -524,6 +524,13 @@ export const PF = {
     const { data } = await q;
     return data ?? [];
   },
+  // Détail seconde-par-seconde d'une activité Strava (GPS/FC/allure/puissance),
+  // récupéré à la demande et mis en cache côté serveur. Renvoie la même forme
+  // que window.PFFit (points bruts) pour rejouer le modal d'analyse.
+  async getActivityStreams(activityId) {
+    const data = await this._invoke("strava-activity-streams", { activity_id: activityId });
+    return data?.points ?? [];
+  },
   // Persiste un import manuel .TCX/.GPX (window.PFFit.parseFile → { summary, data }).
   // Upsert sur (provider, provider_activity_id) : ré-importer le même fichier ne duplique pas.
   async saveActivity(summary, data) {

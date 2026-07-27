@@ -473,5 +473,12 @@
   }
   function txt1(el, localName) { return txt(el, localName); }
 
-  root.PFFit = { parse, parseFile };
+  // Construit la même `data` que parse/parseFile mais à partir de points déjà
+  // normalisés à la forme `raw` (ex. streams Strava zippées côté serveur) —
+  // évite de dupliquer buildData()/buildLaps() pour une 2e source réelle.
+  function buildFromRaw(raw, disc, lapsRaw, opts) {
+    return finishParse(raw, disc || "run", lapsRaw || [], opts || {}, "STRAVA");
+  }
+
+  root.PFFit = { parse, parseFile, buildFromRaw };
 })(typeof window !== "undefined" ? window : globalThis);
