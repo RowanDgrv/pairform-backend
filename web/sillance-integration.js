@@ -52,10 +52,12 @@ const mapVideo   = (v) => ({ id: v.id, disc: v.disc, title: esc(v.title),
 const mapRefs = (p) => p ? {
   ftp: p.ftp, pma: p.pma, cpBike: p.cp_bike, vma: p.vma, cv: p.cv,
   seuilRun: p.seuil_run, css: p.css, fcMax: p.fc_max, fcRepos: p.fc_repos,
+  updatedAt: p.updated_at,
 } : {};
 const mapSession = (s) => ({ id: s.id, disc: s.disc, title: esc(s.title), dur: s.dur,
   dist: s.dist, tss: s.tss, zone: s.zone, done: s.done, rpe: s.rpe,
   ...(s.rpe_muscle != null ? { rpeMuscle: s.rpe_muscle } : {}), note: esc(s.note),
+  coachNote: esc(s.coach_note),
   blocksV2: s.blocks && s.blocks.length ? { blocks: s.blocks } : undefined });
 const mapMember  = (m) => ({ id: m.id, name: esc(m.display_name) || "Athlète",
   disc: m.disc || "tri", since: esc(m.since) || "", group: m.group_id });
@@ -123,6 +125,11 @@ async function hydrate() {
     app.setGear?.(items.map(mapGear));
   });
 
+  await section("raceDebriefs", async () => {
+    const list = await PF.getRaceDebriefs(uid);
+    app.setRaceDebriefs?.(uid, list);
+  });
+
   await section("zones", async () => {
     // zones de travail perso de l'utilisateur (table 0020) — clé = son id.
     try {
@@ -146,10 +153,18 @@ async function hydrate() {
         ...(c.cycle_phase ? { cyclePhase: c.cycle_phase, cycleDay: c.cycle_day } : {}),
       };
     } catch (e) { console.warn("[PF] rosterCheckins :", e); }
+    // Fraîcheur des références physio (FTP/VMA/…) du roster : sert le rappel
+    // "à retester" dans le bandeau coach, sans exposer les valeurs elles-mêmes.
+    let refsByAth = {};
+    try {
+      const refs = await PF.rosterRefs(rows.map((r) => r.athlete_id));
+      for (const r of refs) refsByAth[r.user_id] = r.updated_at;
+    } catch (e) { console.warn("[PF] rosterRefs :", e); }
     const list = rows.map((r) => ({
       id: r.athlete_id,
       name: esc(r.profiles?.full_name || r.profiles?.email) || "Athlète",
       checkin: ckByAth[r.athlete_id] || null,
+      refsUpdatedAt: refsByAth[r.athlete_id] || null,
     }));
     // Un coach avec des athlètes liés planifie par défaut pour le premier
     // (plus utile que "pour soi-même" dans le cas d'usage réel).

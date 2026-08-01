@@ -352,6 +352,27 @@ export const PF = {
     const { error } = await sb.from("scheduled_sessions").delete().eq("id", id);
     if (error) throw error; return true;
   },
+  // Note du coach sur une séance précise (traçabilité d'un ajustement), visible
+  // par l'athlète. RLS : couverte par "sched: coach manages athlete plan".
+  async setCoachNote(id, note) {
+    const { error } = await sb.from("scheduled_sessions").update({ coach_note: note }).eq("id", id);
+    if (error) throw error; return true;
+  },
+
+  // -------- DÉBRIEF POST-COURSE (journal de course de l'athlète) --------
+  async getRaceDebriefs(athleteId = this.user.id) {
+    const { data } = await sb.from("race_debriefs").select("*")
+      .eq("athlete_id", athleteId).order("race_date", { ascending: false });
+    return (data ?? []).map((d) => ({ race: d.race_name, date: d.race_date, result: d.result,
+      felt: d.felt, nutrition: d.nutrition, weather: d.weather, good: d.good, bad: d.bad }));
+  },
+  async saveRaceDebrief({ raceName, raceDate, result, felt, nutrition, weather, good, bad }) {
+    const { data, error } = await sb.from("race_debriefs")
+      .upsert({ athlete_id: this.user.id, race_name: raceName, race_date: raceDate,
+        result, felt, nutrition, weather, good, bad }, { onConflict: "athlete_id,race_name,race_date" })
+      .select().single();
+    if (error) throw error; return data;
+  },
 
   // -------- BIBLIOTHÈQUE DE SÉANCES (coach) --------
   async getTemplates() {
