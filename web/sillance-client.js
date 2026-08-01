@@ -289,6 +289,13 @@ export const PF = {
       .in("athlete_id", athleteIds).eq("date", today);
     return data ?? [];
   },
+  // Fraîcheur des références physio du roster (pas les valeurs, juste la date).
+  async rosterRefs(athleteIds) {
+    if (!athleteIds?.length) return [];
+    const { data } = await sb.from("athlete_profiles").select("user_id, updated_at")
+      .in("user_id", athleteIds);
+    return data ?? [];
+  },
   // ---- Notification du matin (récap séances + matériel) ----
   // Préférences : heure d'envoi, fuseau, canal (email | push | both | none).
   async getNotifPrefs() {
