@@ -359,6 +359,25 @@ export const PF = {
     if (error) throw error; return true;
   },
 
+  // -------- FEEDBACK HEBDO BIDIRECTIONNEL --------
+  async getWeekPulse(athleteId, weekMonday) {
+    const { data } = await sb.from("week_pulses").select("*")
+      .eq("athlete_id", athleteId).eq("week_monday", weekMonday).maybeSingle();
+    return data;
+  },
+  async saveMyWeekFeel(weekMonday, feel, note) {
+    const { error } = await sb.from("week_pulses")
+      .upsert({ athlete_id: this.user.id, week_monday: weekMonday, athlete_feel: feel, athlete_note: note },
+        { onConflict: "athlete_id,week_monday" });
+    if (error) throw error; return true;
+  },
+  async saveCoachWeekNote(athleteId, weekMonday, note) {
+    const { error } = await sb.from("week_pulses")
+      .upsert({ athlete_id: athleteId, week_monday: weekMonday, coach_note: note },
+        { onConflict: "athlete_id,week_monday" });
+    if (error) throw error; return true;
+  },
+
   // -------- DÉBRIEF POST-COURSE (journal de course de l'athlète) --------
   async getRaceDebriefs(athleteId = this.user.id) {
     const { data } = await sb.from("race_debriefs").select("*")
