@@ -53,6 +53,7 @@ const mapRefs = (p) => p ? {
   ftp: p.ftp, pma: p.pma, cpBike: p.cp_bike, vma: p.vma, cv: p.cv,
   seuilRun: p.seuil_run, css: p.css, fcMax: p.fc_max, fcRepos: p.fc_repos,
   updatedAt: p.updated_at,
+  city: esc(p.city), lat: p.lat, lon: p.lon,
 } : {};
 const mapSession = (s) => ({ id: s.id, disc: s.disc, title: esc(s.title), dur: s.dur,
   dist: s.dist, tss: s.tss, zone: s.zone, done: s.done, rpe: s.rpe,

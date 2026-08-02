@@ -430,6 +430,19 @@ export const PF = {
   async acceptInvite(token) {
     return await this._invoke("accept-invite", { token });
   },
+  // -------- MODE SPECTATEUR (lien public, sans compte) --------
+  // Crée ou réutilise le lien pour cette course précise (idempotent par
+  // athlète+course+date). Écriture directe : pas d'usurpation possible,
+  // contrairement à coach_athlete (voir migration 0032).
+  async getOrCreateSpectatorLink(athleteId, raceName, raceDate, pacingNotes) {
+    const { data, error } = await sb.from("spectator_links")
+      .upsert({ athlete_id: athleteId, race_name: raceName, race_date: raceDate,
+        pacing_notes: pacingNotes || null, created_by: this.user.id },
+        { onConflict: "athlete_id,race_name,race_date" })
+      .select().single();
+    if (error) throw error; return data;
+  },
+
   // -------- CO-COACHING : plusieurs coachs par athlète --------
   // Équipe complète d'un athlète (tous les coachs actifs + leur étiquette de rôle).
   async getCoTeam(athleteId) {
