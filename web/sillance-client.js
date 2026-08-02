@@ -430,6 +430,29 @@ export const PF = {
   async acceptInvite(token) {
     return await this._invoke("accept-invite", { token });
   },
+  // -------- CO-COACHING : plusieurs coachs par athlète --------
+  // Équipe complète d'un athlète (tous les coachs actifs + leur étiquette de rôle).
+  async getCoTeam(athleteId) {
+    const { data } = await sb.from("coach_athlete")
+      .select("id, coach_id, role_label, status, coach:coach_id(full_name, email)")
+      .eq("athlete_id", athleteId).eq("status", "active");
+    return data ?? [];
+  },
+  // Demandes d'ajout en attente pour cet athlète (visibles par l'athlète et ses coachs).
+  async getPendingCoCoachRequests(athleteId) {
+    const { data } = await sb.from("co_coach_requests")
+      .select("*").eq("athlete_id", athleteId).eq("status", "pending").order("created_at", { ascending: false });
+    return data ?? [];
+  },
+  // Un coach existant OU l'athlète propose l'ajout d'un coach (par email + rôle libre).
+  async requestCoCoach(athleteId, coachEmail, roleLabel) {
+    return await this._invoke("co-coach-request", { athleteId, coachEmail, roleLabel });
+  },
+  // "L'autre partie" valide ou refuse une demande.
+  async approveCoCoach(requestId, decision) {
+    return await this._invoke("co-coach-approve", { requestId, decision });
+  },
+
   // Lit ?invite= dans l'URL courante (à appeler après connexion).
   pendingInviteToken() {
     return new URLSearchParams(location.search).get("invite");

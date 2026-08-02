@@ -130,6 +130,11 @@ async function hydrate() {
     app.setRaceDebriefs?.(uid, list);
   });
 
+  await section("coTeam", async () => {
+    const [team, pending] = await Promise.all([PF.getCoTeam(uid), PF.getPendingCoCoachRequests(uid)]);
+    app.setCoTeam?.(uid, team, pending);
+  });
+
   await section("zones", async () => {
     // zones de travail perso de l'utilisateur (table 0020) — clé = son id.
     try {
