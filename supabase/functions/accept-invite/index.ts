@@ -49,7 +49,7 @@ Deno.serve(async (req) => {
     return json({ ok: true, coach_id: invite.coach_id });
   } catch (e) {
     console.error(e);
-    return json({ error: String(e) }, 500);
+    return json({ error: "Erreur serveur" }, 500);
   }
 });
 

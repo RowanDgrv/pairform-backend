@@ -57,6 +57,6 @@ Deno.serve(async (req) => {
     return json({ url: `${cfg.authorizeUrl}?` + new URLSearchParams(params).toString() });
   } catch (e) {
     console.error(e);
-    return json({ error: String(e) }, 500);
+    return json({ error: "Erreur serveur" }, 500);
   }
 });

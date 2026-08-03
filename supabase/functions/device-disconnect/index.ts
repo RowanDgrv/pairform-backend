@@ -32,6 +32,6 @@ Deno.serve(async (req) => {
     return json({ disconnected: true });
   } catch (e) {
     console.error(e);
-    return json({ error: String(e) }, 500);
+    return json({ error: "Erreur serveur" }, 500);
   }
 });
