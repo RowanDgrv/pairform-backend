@@ -10,7 +10,18 @@
        onLost:fn          // contexte WebGL perdu (afficher un fallback)
      });
      flow.freeze(t)  // fige à l'instant t (captures) ; eau=18, vent=6, mi=0
-   Retourne null si WebGL indisponible. */
+   Retourne null si WebGL indisponible (échec initial : pas de contexte, échec
+   de compilation des shaders). Deux chemins de fallback distincts côté
+   appelant, aucun des deux ne force explicitement l'affichage du fallback
+   dans le cas de l'échec initial — ça fonctionne quand même car le fallback
+   est visible par défaut en CSS (pas de display:none tant que JS ne le
+   masque pas) :
+     - échec initial (attach renvoie null)  → onLost n'est jamais appelé,
+       le fallback reste dans son état par défaut (visible) puisque rien
+       ne l'a caché.
+     - contexte perdu en cours de route (webglcontextlost, ex. crash driver
+       GPU) → onLost EST appelé, l'appelant masque le canvas et réaffiche
+       le fallback explicitement. */
 (function (global) {
   'use strict';
 
