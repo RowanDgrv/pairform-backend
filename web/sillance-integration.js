@@ -87,62 +87,13 @@ async function hydrate() {
     window.__pf_lockModes(realMode);
   }
 
-  // Chaque section est isolée : une erreur ne bloque pas les autres.
-  await section("refs", async () => {
-    const refs = await PF.getAthleteRefs();
-    if (refs) app.assignObj(app.data.ATHLETE_REF, mapRefs(refs));
-  });
-
-  await section("records", async () => {
-    const recs = await PF.getRecords(uid);
-    if (recs.length) app.replaceArray(app.data.RECORDS, recs.map(mapRecord));
-    // Compte confirmé sans la moindre activité réelle (ni record, ni import) :
-    // on ne veut pas montrer les records/graphiques de démo comme si c'était
-    // les siens. S'il y a le moindre signal réel, on n'y touche pas.
-    const acts = await PF.getActivities(1, uid);
-    const hasActivity = recs.length > 0 || acts.length > 0;
-    if (!hasActivity) {
-      app.replaceArray(app.data.RECORDS, []);
-      app.setActivityState?.(false);
-    }
-  });
-
-  await section("checkin", async () => {
-    const c = await PF.todayCheckin();
-    if (c) app.assignObj(app.data.checkin,
-      { sommeil: c.sommeil, fatigue: c.fatigue, motivation: c.motivation,
-        // colonnes 0019 (poids/dispo) : absentes tant que la migration n'est pas déployée
-        ...(c.poids != null ? { poids: c.poids } : {}),
-        ...(c.hrv != null ? { hrv: c.hrv } : {}),
-        ...(c.cycle_phase ? { cyclePhase: c.cycle_phase, cycleDay: c.cycle_day } : {}),
-        dispo: c.dispo || 'ok', dispoNote: c.dispo_note || '' });
-  });
-
-  await section("gear", async () => {
-    const items = await PF.getGear(uid);
-    // Set inconditionnel : un compte réel sans matériel voit la section vide,
-    // pas le matériel de démonstration présenté comme le sien.
-    app.setGear?.(items.map(mapGear));
-  });
-
-  await section("raceDebriefs", async () => {
-    const list = await PF.getRaceDebriefs(uid);
-    app.setRaceDebriefs?.(uid, list);
-  });
-
-  await section("coTeam", async () => {
-    const [team, pending] = await Promise.all([PF.getCoTeam(uid), PF.getPendingCoCoachRequests(uid)]);
-    app.setCoTeam?.(uid, team, pending);
-  });
-
-  await section("zones", async () => {
-    // zones de travail perso de l'utilisateur (table 0020) — clé = son id.
-    try {
-      const z = await PF.getAthleteZones(uid);
-      app.setAthleteZones?.(uid, z || null);
-    } catch (e) { console.warn("[PF] getAthleteZones :", e); }
-  });
-
+  // Une seule dépendance réelle dans toute l'hydratation : "planning" a besoin
+  // de defaultAthleteId, calculé par "coachAthletes". Celle-ci doit donc
+  // rester séquentielle et passer avant tout le reste ; les 12 autres sections
+  // (+ planning une fois defaultAthleteId connu) sont indépendantes entre elles
+  // — chacune isolée par section() — et tournent en parallèle (Promise.all)
+  // plutôt qu'en série, ce qui divise le temps d'hydratation par ~1/n plutôt
+  // que de le sommer.
   let defaultAthleteId = null; // null = planifier pour soi-même (comportement historique)
   await section("coachAthletes", async () => {
     const rows = await PF.myAthletes();
@@ -177,72 +128,133 @@ async function hydrate() {
     app.setCoachAthletes?.(list, defaultAthleteId);
   });
 
-  await section("planning", async () => {
-    await loadPlanningFor(defaultAthleteId);
-  });
+  // Les 13 sections restantes sont indépendantes entre elles (chacune isolée
+  // par section(), une erreur ne bloque pas les autres) : parallélisées au
+  // lieu d'être sommées en série. "planning" peut y rejoindre les autres
+  // puisque defaultAthleteId est déjà connu à ce stade.
+  await Promise.all([
+    section("refs", async () => {
+      const refs = await PF.getAthleteRefs();
+      if (refs) app.assignObj(app.data.ATHLETE_REF, mapRefs(refs));
+    }),
 
-  await section("videos", async () => {
-    const vids = await PF.getVideos();
-    if (vids.length) app.replaceArray(app.data.VIDEOS, vids.map(mapVideo));
-  });
-
-  await section("club", async () => {
-    const clubs = await PF.myClubs();
-    if (!clubs.length) {
-      // Aucun club réel : ne pas laisser le club de démonstration (Muret Goat
-      // Squad et ses adhérents fictifs) visible comme si c'était le sien.
-      app.replaceArray(app.data.CLUB_ATHLETES, []);
-      app.replaceArray(app.data.CLUB_GROUPS, []);
-      app.replaceArray(app.data.CRENEAUX, []);
-      const el = document.getElementById("clubName");
-      if (el) el.textContent = "Mon club";
-      return;
-    }
-    const club = clubs[0];
-    window.__pf_clubId = club.id;   // exposé pour les écritures (création créneau)
-    const [members, creneaux] = await Promise.all([
-      PF.getClubMembers(club.id),
-      PF.getCreneaux(club.id),
-    ]);
-    app.replaceArray(app.data.CLUB_ATHLETES, members.map(mapMember));
-    const groups = await PF.sb.from("club_groups").select("*").eq("club_id", club.id);
-    if (groups.data) app.replaceArray(app.data.CLUB_GROUPS, groups.data.map(mapGroup));
-    app.replaceArray(app.data.CRENEAUX, creneaux.map(mapCreneau));
-    // titre du club affiché
-    const clubNameEl = document.getElementById("clubName");
-    if (clubNameEl) clubNameEl.textContent = club.name;
-  });
-
-  // Objets connectés (Strava/Garmin/Coros) : état réel + activités importées.
-  await section("devices", async () => { await app.refreshDevices?.(); });
-
-  // Gate premium : masque/déverrouille le contenu payant selon l'abonnement.
-  await section("premium", async () => {
-    const ok = await PF.isSubscribed();
-    document.body.classList.toggle("pf-subscribed", ok);
-    window.__pf_subscribed = ok;
-    // Essai gratuit + paywall du coach (l'abo 29€ est le produit Phase 1).
-    const role = PF.profile?.role;
-    let trialDaysLeft = null, locked = false;
-    if (role === "coach" && !ok) {
-      const created = PF.profile?.created_at ? new Date(PF.profile.created_at) : null;
-      if (created && !isNaN(created)) {
-        const end = new Date(created.getTime() + TRIAL_DAYS * 86400000);
-        trialDaysLeft = Math.ceil((end - Date.now()) / 86400000);
-        locked = trialDaysLeft <= 0;
+    section("records", async () => {
+      const recs = await PF.getRecords(uid);
+      if (recs.length) app.replaceArray(app.data.RECORDS, recs.map(mapRecord));
+      // Compte confirmé sans la moindre activité réelle (ni record, ni import) :
+      // on ne veut pas montrer les records/graphiques de démo comme si c'était
+      // les siens. S'il y a le moindre signal réel, on n'y touche pas.
+      const acts = await PF.getActivities(1, uid);
+      const hasActivity = recs.length > 0 || acts.length > 0;
+      if (!hasActivity) {
+        app.replaceArray(app.data.RECORDS, []);
+        app.setActivityState?.(false);
       }
-    }
-    window.__pf_trial_days = trialDaysLeft;
-    renderCoachGate({ subscribed: ok, role, trialDaysLeft, locked });
-    // Vidéos : réservées aux athlètes que leur coach a activés (et payés).
-    const videosOk = role === "athlete" ? await PF.athleteHasVideos() : true;
-    window.__pf_videos_ok = videosOk;
-    renderVideoGate({ role, videosOk });
-  });
+    }),
 
-  await section("aiAddon", async () => {
-    window.__pf_aiAddon = await PF.hasAiAddon();
-  });
+    section("checkin", async () => {
+      const c = await PF.todayCheckin();
+      if (c) app.assignObj(app.data.checkin,
+        { sommeil: c.sommeil, fatigue: c.fatigue, motivation: c.motivation,
+          // colonnes 0019 (poids/dispo) : absentes tant que la migration n'est pas déployée
+          ...(c.poids != null ? { poids: c.poids } : {}),
+          ...(c.hrv != null ? { hrv: c.hrv } : {}),
+          ...(c.cycle_phase ? { cyclePhase: c.cycle_phase, cycleDay: c.cycle_day } : {}),
+          dispo: c.dispo || 'ok', dispoNote: c.dispo_note || '' });
+    }),
+
+    section("gear", async () => {
+      const items = await PF.getGear(uid);
+      // Set inconditionnel : un compte réel sans matériel voit la section vide,
+      // pas le matériel de démonstration présenté comme le sien.
+      app.setGear?.(items.map(mapGear));
+    }),
+
+    section("raceDebriefs", async () => {
+      const list = await PF.getRaceDebriefs(uid);
+      app.setRaceDebriefs?.(uid, list);
+    }),
+
+    section("coTeam", async () => {
+      const [team, pending] = await Promise.all([PF.getCoTeam(uid), PF.getPendingCoCoachRequests(uid)]);
+      app.setCoTeam?.(uid, team, pending);
+    }),
+
+    section("zones", async () => {
+      // zones de travail perso de l'utilisateur (table 0020) — clé = son id.
+      try {
+        const z = await PF.getAthleteZones(uid);
+        app.setAthleteZones?.(uid, z || null);
+      } catch (e) { console.warn("[PF] getAthleteZones :", e); }
+    }),
+
+    section("planning", async () => {
+      await loadPlanningFor(defaultAthleteId);
+    }),
+
+    section("videos", async () => {
+      const vids = await PF.getVideos();
+      if (vids.length) app.replaceArray(app.data.VIDEOS, vids.map(mapVideo));
+    }),
+
+    section("club", async () => {
+      const clubs = await PF.myClubs();
+      if (!clubs.length) {
+        // Aucun club réel : ne pas laisser le club de démonstration (Muret Goat
+        // Squad et ses adhérents fictifs) visible comme si c'était le sien.
+        app.replaceArray(app.data.CLUB_ATHLETES, []);
+        app.replaceArray(app.data.CLUB_GROUPS, []);
+        app.replaceArray(app.data.CRENEAUX, []);
+        const el = document.getElementById("clubName");
+        if (el) el.textContent = "Mon club";
+        return;
+      }
+      const club = clubs[0];
+      window.__pf_clubId = club.id;   // exposé pour les écritures (création créneau)
+      const [members, creneaux] = await Promise.all([
+        PF.getClubMembers(club.id),
+        PF.getCreneaux(club.id),
+      ]);
+      app.replaceArray(app.data.CLUB_ATHLETES, members.map(mapMember));
+      const groups = await PF.sb.from("club_groups").select("*").eq("club_id", club.id);
+      if (groups.data) app.replaceArray(app.data.CLUB_GROUPS, groups.data.map(mapGroup));
+      app.replaceArray(app.data.CRENEAUX, creneaux.map(mapCreneau));
+      // titre du club affiché
+      const clubNameEl = document.getElementById("clubName");
+      if (clubNameEl) clubNameEl.textContent = club.name;
+    }),
+
+    // Objets connectés (Strava/Garmin/Coros) : état réel + activités importées.
+    section("devices", async () => { await app.refreshDevices?.(); }),
+
+    // Gate premium : masque/déverrouille le contenu payant selon l'abonnement.
+    section("premium", async () => {
+      const ok = await PF.isSubscribed();
+      document.body.classList.toggle("pf-subscribed", ok);
+      window.__pf_subscribed = ok;
+      // Essai gratuit + paywall du coach (l'abo 29€ est le produit Phase 1).
+      const role = PF.profile?.role;
+      let trialDaysLeft = null, locked = false;
+      if (role === "coach" && !ok) {
+        const created = PF.profile?.created_at ? new Date(PF.profile.created_at) : null;
+        if (created && !isNaN(created)) {
+          const end = new Date(created.getTime() + TRIAL_DAYS * 86400000);
+          trialDaysLeft = Math.ceil((end - Date.now()) / 86400000);
+          locked = trialDaysLeft <= 0;
+        }
+      }
+      window.__pf_trial_days = trialDaysLeft;
+      renderCoachGate({ subscribed: ok, role, trialDaysLeft, locked });
+      // Vidéos : réservées aux athlètes que leur coach a activés (et payés).
+      const videosOk = role === "athlete" ? await PF.athleteHasVideos() : true;
+      window.__pf_videos_ok = videosOk;
+      renderVideoGate({ role, videosOk });
+    }),
+
+    section("aiAddon", async () => {
+      window.__pf_aiAddon = await PF.hasAiAddon();
+    }),
+  ]);
 
   // Re-render complet avec les données fraîches.
   try {
