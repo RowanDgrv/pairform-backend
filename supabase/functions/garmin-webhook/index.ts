@@ -4,7 +4,7 @@
 //  On résout l'utilisateur par userId Garmin (= provider_user_id) et on upsert.
 // =============================================================================
 import { admin } from "../_shared/providers.ts";
-import { garminUpsertActivities, garminGet, isGarminCallbackUrl } from "../_shared/garmin.ts";
+import { garminImportRecent } from "../_shared/garmin.ts";
 
 Deno.serve(async (req) => {
   if (req.method !== "POST") return new Response("ok");
@@ -17,40 +17,24 @@ Deno.serve(async (req) => {
 
 async function ingest(payload: any) {
   const sb = admin();
+  // ⚠️ SÉCURITÉ : le webhook n'est pas authentifié et Garmin ne signe pas ses
+  // pushes → on NE FAIT PAS confiance aux champs d'activité du payload (un
+  // pirate connaissant le userId Garmin d'un athlète pourrait y injecter un
+  // nom d'activité arbitraire, y compris du HTML/JS, rendu ensuite sans
+  // échappement côté app). Même pattern que Strava/Coros : le payload sert
+  // UNIQUEMENT de déclencheur ; les données réelles sont RE-TÉLÉCHARGÉES via
+  // l'API Garmin authentifiée avec le jeton stocké (garminImportRecent).
   // PUSH : { activities: [ { userId, ... } ] }   |   PING : { activities:[{userId, callbackURL}] }
   const items: any[] = payload?.activities ?? payload?.activityDetails ?? [];
-  // Regroupe par userId.
-  const byUser = new Map<string, any[]>();
+  const garminUids = new Set<string>();
   for (const it of items) {
-    const uid = it.userId;
-    if (!uid) continue;
-    if (!byUser.has(uid)) byUser.set(uid, []);
-    byUser.get(uid)!.push(it);
+    if (it?.userId) garminUids.add(String(it.userId));
   }
 
-  for (const [garminUid, list] of byUser) {
+  for (const garminUid of garminUids) {
     const { data: conn } = await sb.from("device_connections")
-      .select("*").eq("provider", "garmin").eq("provider_user_id", String(garminUid)).maybeSingle();
+      .select("*").eq("provider", "garmin").eq("provider_user_id", garminUid).maybeSingle();
     if (!conn) continue;
-
-    // PING : on récupère les données via la callbackURL signée.
-    // ⚠️ SÉCURITÉ : le webhook n'est pas authentifié, donc callbackURL est une
-    // valeur NON DE CONFIANCE. On rejette toute URL hors *.garmin.com avant de
-    // fetch, sinon un pirate déclencherait une SSRF (métadonnées cloud, réseau
-    // interne) en forgeant un ping.
-    const pings = list.filter((x) => x.callbackURL && isGarminCallbackUrl(x.callbackURL));
-    let activities = list.filter((x) => !x.callbackURL);
-    for (const p of pings) {
-      try {
-        const res = await garminGet(p.callbackURL, conn.access_token, conn.token_secret);
-        if (res.ok) {
-          const data = await res.json();
-          activities = activities.concat(Array.isArray(data) ? data : (data.activities ?? []));
-        }
-      } catch (e) { console.error("garmin ping pull:", e); }
-    }
-
-    await garminUpsertActivities(sb, activities, conn.user_id);
-    await sb.from("device_connections").update({ last_sync_at: new Date().toISOString() }).eq("id", conn.id);
+    try { await garminImportRecent(sb, conn); } catch (e) { console.error("garmin re-fetch:", e); }
   }
 }
