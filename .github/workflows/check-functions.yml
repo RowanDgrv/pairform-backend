@@ -1,0 +1,34 @@
+name: Vérifier les edge functions
+
+# Constat audit pré-prod (03/08/2026) : aucun .github/workflows dans ce dépôt,
+# aucune vérification avant un déploiement manuel (supabase functions deploy).
+# Ce workflow ne déploie rien (le déploiement reste manuel, voir DEPLOY.md) —
+# il type-check chaque edge function à chaque push, pour attraper une erreur
+# de syntaxe/type AVANT de la pousser en prod plutôt qu'après.
+
+on:
+  push:
+    paths:
+      - "supabase/functions/**"
+  pull_request:
+    paths:
+      - "supabase/functions/**"
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v1
+        with:
+          deno-version: v1.x
+      - name: deno check sur chaque edge function
+        run: |
+          set -euo pipefail
+          status=0
+          for f in supabase/functions/*/index.ts; do
+            echo "— $f"
+            deno check "$f" || status=1
+          done
+          exit $status
