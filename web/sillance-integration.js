@@ -73,9 +73,37 @@ const mapGear = (g) => ({ id: g.id, type: g.type, name: esc(g.name), brand: esc(
 /* ===========================================================================
  *  HYDRATATION — remplit les globales de l'app depuis Supabase
  * ========================================================================= */
+// État de chargement (audit 03/08/2026 : quasi-absence d'états de chargement
+// alors que l'app dépend de nombreux appels async). Barre fine en haut de
+// page pendant l'hydratation complète depuis Supabase — la plus grosse
+// fenêtre "silencieuse" de l'app (connexion/rechargement).
+function showHydrateLoader() {
+  let bar = document.getElementById("pf-hydrate-bar");
+  if (!bar) {
+    if (!document.getElementById("pf-hydrate-style")) {
+      const st = document.createElement("style");
+      st.id = "pf-hydrate-style";
+      st.textContent = "@keyframes pf-hydrate-anim{0%{background-position:200% 0}100%{background-position:-200% 0}}";
+      document.head.appendChild(st);
+    }
+    bar = document.createElement("div");
+    bar.id = "pf-hydrate-bar";
+    bar.style.cssText = "position:fixed;top:0;left:0;height:3px;width:100%;z-index:9999;"
+      + "background:linear-gradient(90deg,transparent,#46C2D8,transparent);background-size:200% 100%;"
+      + "animation:pf-hydrate-anim 1.1s ease-in-out infinite;pointer-events:none;";
+    document.body.appendChild(bar);
+  }
+  bar.style.display = "block";
+}
+function hideHydrateLoader() {
+  const bar = document.getElementById("pf-hydrate-bar");
+  if (bar) bar.style.display = "none";
+}
+
 async function hydrate() {
   const app = A();
   if (!app) { console.warn("[PF] hook __pf_app absent — app pas prête"); return; }
+  showHydrateLoader();
   const uid = PF.user.id;
 
   // Compte réel = un seul rôle réel : verrouille les 2 autres vues (Coach/
@@ -264,6 +292,7 @@ async function hydrate() {
     if (app.getMode?.() === "club") app.renderClub?.();
   } catch (e) { console.error("[PF] re-render échoué :", e); }
 
+  hideHydrateLoader();
   setCloudBadge(true);
 }
 
