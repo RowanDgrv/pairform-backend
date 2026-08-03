@@ -645,6 +645,21 @@ export const PF = {
     return saved;
   },
 
+  // -------- télémétrie --------
+  // Best-effort : ne doit jamais faire planter l'appelant ni remonter d'erreur.
+  async logClientError({ message, stack, url, context }) {
+    try {
+      await sb.from("client_errors").insert({
+        user_id: this.user?.id ?? null,
+        message: String(message ?? "").slice(0, 2000),
+        stack: stack ? String(stack).slice(0, 8000) : null,
+        url: url ? String(url).slice(0, 500) : null,
+        user_agent: navigator.userAgent.slice(0, 300),
+        context: context ?? null,
+      });
+    } catch { /* silencieux — la télémétrie ne doit jamais casser l'app */ }
+  },
+
   // -------- interne --------
   async _invoke(fn, body) {
     const { data, error } = await sb.functions.invoke(fn, { body });
