@@ -133,41 +133,47 @@ Deno.serve(async (req) => {
         : `Ta séance du jour — ${lines[0].split(" — ")[0]}`;
       const bodyTxt = `${lines.join("\n")}\n\nÀ prévoir : ${gear.join(", ")}\n${nutri}`;
 
-      // --- email ---
-      if (p.channel === "email" || p.channel === "both") {
-        const { data: prof } = await supabase.from("profiles")
-          .select("email, full_name").eq("id", p.user_id).single();
-        if (prof?.email) {
-          await sendEmail({
-            to: prof.email,
-            subject: `☀️ ${title}`,
-            html: digestHtml(prof.full_name ?? "champion·ne", lines, gear, nutri),
-          });
-        }
-      }
-
-      // --- push (tous les appareils enregistrés) ---
-      if (appServer && (p.channel === "push" || p.channel === "both")) {
-        const { data: subs } = await supabase.from("push_subscriptions")
-          .select("id, endpoint, p256dh, auth").eq("user_id", p.user_id);
-        for (const s of subs ?? []) {
-          try {
-            const subscriber = appServer.subscribe({
-              endpoint: s.endpoint,
-              keys: { p256dh: s.p256dh, auth: s.auth },
+      // Email et push sont totalement indépendants (tables et effets de bord
+      // distincts) — parallélisés au lieu d'enchaîner jusqu'à 4 requêtes en
+      // série par utilisateur (constat perf de l'audit 03/08/2026). Toujours
+      // Promise.all (pas allSettled) : une erreur continue d'interrompre le
+      // traitement de cet utilisateur, comportement identique à avant.
+      await Promise.all([
+        (async () => {
+          if (p.channel !== "email" && p.channel !== "both") return;
+          const { data: prof } = await supabase.from("profiles")
+            .select("email, full_name").eq("id", p.user_id).single();
+          if (prof?.email) {
+            await sendEmail({
+              to: prof.email,
+              subject: `☀️ ${title}`,
+              html: digestHtml(prof.full_name ?? "champion·ne", lines, gear, nutri),
             });
-            await subscriber.pushTextMessage(JSON.stringify({
-              title, body: bodyTxt, url: "./sillance-app.html",
-            }), {});
-          } catch (e) {
-            // abonnement mort (navigateur désinscrit) → on le retire
-            const msg = String(e);
-            if (msg.includes("404") || msg.includes("410")) {
-              await supabase.from("push_subscriptions").delete().eq("id", s.id);
-            } else console.warn("push KO:", s.endpoint.slice(0, 40), msg.slice(0, 120));
           }
-        }
-      }
+        })(),
+        (async () => {
+          if (!appServer || (p.channel !== "push" && p.channel !== "both")) return;
+          const { data: subs } = await supabase.from("push_subscriptions")
+            .select("id, endpoint, p256dh, auth").eq("user_id", p.user_id);
+          for (const s of subs ?? []) {
+            try {
+              const subscriber = appServer.subscribe({
+                endpoint: s.endpoint,
+                keys: { p256dh: s.p256dh, auth: s.auth },
+              });
+              await subscriber.pushTextMessage(JSON.stringify({
+                title, body: bodyTxt, url: "./sillance-app.html",
+              }), {});
+            } catch (e) {
+              // abonnement mort (navigateur désinscrit) → on le retire
+              const msg = String(e);
+              if (msg.includes("404") || msg.includes("410")) {
+                await supabase.from("push_subscriptions").delete().eq("id", s.id);
+              } else console.warn("push KO:", s.endpoint.slice(0, 40), msg.slice(0, 120));
+            }
+          }
+        })(),
+      ]);
 
       await supabase.from("notification_prefs")
         .update({ last_sent_on: now.day }).eq("user_id", p.user_id);
