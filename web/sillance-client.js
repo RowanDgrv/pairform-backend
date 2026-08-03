@@ -17,7 +17,52 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 const SUPABASE_URL = "https://onbsgohvqejccowfnrbs.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_Tiz8pcjnik-Xj85Jvahivw_dfNqf_TT";
 
-const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+/* -------- fetch résilient (timeout + retry) --------
+   Constat de l'audit pré-prod : aucun retry ni timeout sur les appels
+   réseau côté client — une requête qui pend bloque indéfiniment, un blip
+   réseau fait échouer sans seconde chance. Branché une seule fois via
+   l'option `global.fetch` du client Supabase : couvre TOUTES les requêtes
+   (table queries, RPC, functions.invoke) sans toucher chaque appel un par
+   un. Le timeout s'applique à tout ; le retry est réservé aux lectures
+   (GET) — rejouer une écriture (POST/PATCH/DELETE) à l'aveugle risquerait
+   un doublon si le premier essai avait en fait réussi côté serveur. */
+const FETCH_TIMEOUT_MS = 12000;
+const READ_RETRIES = 2;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function resilientFetch(url, options = {}) {
+  const method = (options.method || "GET").toUpperCase();
+  const maxAttempts = method === "GET" ? READ_RETRIES + 1 : 1;
+  let lastErr;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const controller = new AbortController();
+    const onAbort = () => controller.abort();
+    options.signal?.addEventListener("abort", onAbort);
+    const timer = setTimeout(onAbort, FETCH_TIMEOUT_MS);
+    try {
+      const res = await fetch(url, { ...options, signal: controller.signal });
+      clearTimeout(timer);
+      options.signal?.removeEventListener("abort", onAbort);
+      // Erreur serveur transitoire sur une lecture : encore une chance.
+      if (method === "GET" && res.status >= 500 && attempt < maxAttempts) {
+        await sleep(300 * attempt);
+        continue;
+      }
+      return res;
+    } catch (e) {
+      clearTimeout(timer);
+      options.signal?.removeEventListener("abort", onAbort);
+      lastErr = e;
+      if (attempt < maxAttempts) { await sleep(300 * attempt); continue; }
+      throw e;
+    }
+  }
+  throw lastErr;
+}
+
+const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  global: { fetch: resilientFetch },
+});
 
 export const PF = {
   sb,
