@@ -1,0 +1,52 @@
+name: Vérifier la synchronisation front/backend
+
+# Constat architecture de l'audit pré-prod (03/08/2026) : sillance-client.js,
+# sillance-integration.js, sillance-flow.js, sillance-fit.js et
+# sillance-tour.js existent en double — une copie ici (web/) et une copie
+# dans le dépôt front (github.com/RowanDgrv/sillance), synchronisées à la
+# main. Le risque de dérive est réel (déjà arrivé une fois sur les tokens
+# CSS des 3 HTML). Ce workflow checkout les deux dépôts et échoue si une
+# des 5 copies a divergé, avant que ça ne devienne un bug silencieux.
+
+on:
+  push:
+    paths:
+      - "web/**"
+  pull_request:
+    paths:
+      - "web/**"
+  workflow_dispatch:
+
+jobs:
+  check-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout pairform-backend
+        uses: actions/checkout@v4
+        with:
+          path: backend
+
+      - name: Checkout sillance (front)
+        uses: actions/checkout@v4
+        with:
+          repository: RowanDgrv/sillance
+          path: front
+
+      - name: Diff des fichiers partagés
+        run: |
+          set -euo pipefail
+          status=0
+          for f in sillance-client.js sillance-integration.js sillance-flow.js sillance-fit.js sillance-tour.js; do
+            if [ ! -f "front/$f" ]; then
+              echo "::warning::$f absent du dépôt front, rien à comparer"
+              continue
+            fi
+            if ! diff -q "backend/web/$f" "front/$f" > /dev/null; then
+              echo "::error file=web/$f::$f a divergé entre pairform-backend/web et le dépôt front sillance"
+              diff "backend/web/$f" "front/$f" || true
+              status=1
+            else
+              echo "$f : synchronisé ✓"
+            fi
+          done
+          exit $status
