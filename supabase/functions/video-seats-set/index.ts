@@ -39,6 +39,15 @@ Deno.serve(async (req) => {
     if (!user) return json({ error: "Non authentifié" }, 401);
     const coachId = user.id;
 
+    // Vérification coach → athlète : sans ça, n'importe quel appelant
+    // authentifié pouvait activer/désactiver l'accès vidéo (et déclencher de
+    // la facturation Stripe) pour un athlete_id arbitraire, pas seulement le
+    // sien. Requête directe (pas de RPC is_coach_of : elle repose sur
+    // auth.uid(), qui vaut NULL ici car ce client utilise la service_role key).
+    const { data: rel } = await supabase.from("coach_athlete")
+      .select("id").eq("coach_id", coachId).eq("athlete_id", athlete_id).eq("status", "active").maybeSingle();
+    if (!rel) return json({ error: "Cet athlète n'est pas dans ton roster" }, 403);
+
     // 1) Enregistre l'activation/désactivation applicative de cet athlète.
     await supabase.from("video_access").upsert({
       coach_id: coachId,
