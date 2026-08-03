@@ -104,7 +104,8 @@ export const PF = {
   },
 
   async loadProfile() {
-    const { data } = await sb.from("profiles").select("*").eq("id", this.user.id).single();
+    const { data, error } = await sb.from("profiles").select("*").eq("id", this.user.id).single();
+    if (error) console.warn("[PF] lecture profiles échouée :", error.message);
     this.profile = data;
     return data;
   },
@@ -122,8 +123,9 @@ export const PF = {
     window.location.href = url;
   },
   async mySubscription() {
-    const { data } = await sb.from("subscriptions")
+    const { data, error } = await sb.from("subscriptions")
       .select("*").order("updated_at", { ascending: false }).limit(1).maybeSingle();
+    if (error) console.warn("[PF] lecture subscriptions échouée :", error.message);
     return data;
   },
   async isSubscribed() {
@@ -134,9 +136,10 @@ export const PF = {
   // Le coach a-t-il l'add-on IA actif ? (lecture directe de la table d'entitlement)
   async hasAiAddon() {
     // plusieurs lignes possibles (historique d'abos) → on prend la plus récente
-    const { data } = await sb.from("ai_addons")
+    const { data, error } = await sb.from("ai_addons")
       .select("status, current_period_end")
       .order("updated_at", { ascending: false }).limit(1).maybeSingle();
+    if (error) console.warn("[PF] lecture ai_addons échouée :", error.message);
     if (!data) return false;
     const live = ["active", "trialing"].includes(data.status);
     const notExpired = !data.current_period_end || new Date(data.current_period_end) > new Date();
@@ -156,8 +159,9 @@ export const PF = {
   // ---- Option « Vidéos » PAR ATHLÈTE (le coach paie un siège par athlète) ----
   // Liste des activations vidéo du coach connecté : [{athlete_id, active}].
   async getVideoAccess() {
-    const { data } = await sb.from("video_access")
-      .select("athlete_id, active").eq("coach_id", this.user.id);
+    const { data, error } = await sb.from("video_access")
+      .select("athlete_id, active").eq("coach_id", this.user.id).limit(500);
+    if (error) console.warn("[PF] lecture video_access échouée :", error.message);
     return data ?? [];
   },
   // Le coach (dés)active les vidéos pour un athlète. Renvoie {url} si un
@@ -227,7 +231,8 @@ export const PF = {
   },
   // Offre(s) de coaching d'un coach (par défaut : le coach connecté).
   async getCoachOffers(coachId = this.user.id) {
-    const { data } = await sb.from("coach_offers").select("*").eq("coach_id", coachId);
+    const { data, error } = await sb.from("coach_offers").select("*").eq("coach_id", coachId);
+    if (error) console.warn("[PF] lecture coach_offers échouée :", error.message);
     return data ?? [];
   },
   // Met à jour l'offre de coaching du coach (idempotent : réutilise l'offre
@@ -247,8 +252,9 @@ export const PF = {
   // coachId optionnel : si absent, on résout le coach actif de l'athlète.
   async subscribeToCoach(coachId = null, offerId = null) {
     if (!coachId) {
-      const { data } = await sb.from("coach_athlete")
+      const { data, error } = await sb.from("coach_athlete")
         .select("coach_id").eq("athlete_id", this.user.id).eq("status", "active").limit(1).maybeSingle();
+    if (error) console.warn("[PF] lecture coach_athlete échouée :", error.message);
       coachId = data?.coach_id;
       if (!coachId) throw new Error("Aucun coach actif pour cet athlète");
     }
@@ -259,7 +265,8 @@ export const PF = {
   },
   // Abonnements de coaching (coach : les siens ; athlète : les siens — via RLS).
   async getCoachingSubscriptions() {
-    const { data } = await sb.from("coaching_subscriptions").select("*");
+    const { data, error } = await sb.from("coaching_subscriptions").select("*");
+    if (error) console.warn("[PF] lecture coaching_subscriptions échouée :", error.message);
     return data ?? [];
   },
   // Factures Stripe des athlètes qui paient CE coach (montant, athlète, PDF).
@@ -269,7 +276,8 @@ export const PF = {
 
   // -------- DONNÉES ATHLÈTE --------
   async getAthleteRefs() {
-    const { data } = await sb.from("athlete_profiles").select("*").eq("user_id", this.user.id).maybeSingle();
+    const { data, error } = await sb.from("athlete_profiles").select("*").eq("user_id", this.user.id).maybeSingle();
+    if (error) console.warn("[PF] lecture athlete_profiles échouée :", error.message);
     return data;
   },
   async saveAthleteRefs(refs) {
@@ -282,8 +290,9 @@ export const PF = {
   // -------- ZONES DE TRAVAIL PERSONNALISÉES (coach définit, athlète lit) --------
   // zones = { modelKey: [[nom, borneBasse, borneHaute], ...] } (migration 0020)
   async getAthleteZones(athleteId = this.user.id) {
-    const { data } = await sb.from("athlete_zones").select("zones")
+    const { data, error } = await sb.from("athlete_zones").select("zones")
       .eq("athlete_id", athleteId).maybeSingle();
+    if (error) console.warn("[PF] lecture athlete_zones échouée :", error.message);
     return data ? data.zones : null;
   },
   async saveAthleteZones(athleteId, zones) {
@@ -295,8 +304,9 @@ export const PF = {
   },
 
   async getRecords(athleteId = this.user.id) {
-    const { data } = await sb.from("records").select("*").eq("athlete_id", athleteId)
-      .order("recorded_at", { ascending: false });
+    const { data, error } = await sb.from("records").select("*").eq("athlete_id", athleteId)
+      .order("recorded_at", { ascending: false }).limit(200);
+    if (error) console.warn("[PF] lecture records échouée :", error.message);
     return data ?? [];
   },
   async addRecord({ label, value, isNew = true }) {
@@ -307,8 +317,9 @@ export const PF = {
 
   async todayCheckin() {
     const today = new Date().toISOString().slice(0, 10);
-    const { data } = await sb.from("checkins").select("*")
+    const { data, error } = await sb.from("checkins").select("*")
       .eq("athlete_id", this.user.id).eq("date", today).maybeSingle();
+    if (error) console.warn("[PF] lecture checkins échouée :", error.message);
     return data;
   },
   async saveCheckin({ sommeil, fatigue, motivation, readiness, poids, dispo, dispoNote, hrv, cyclePhase, cycleDay }) {
@@ -330,22 +341,25 @@ export const PF = {
   async rosterCheckins(athleteIds) {
     if (!athleteIds?.length) return [];
     const today = new Date().toISOString().slice(0, 10);
-    const { data } = await sb.from("checkins").select("*")
+    const { data, error } = await sb.from("checkins").select("*")
       .in("athlete_id", athleteIds).eq("date", today);
+    if (error) console.warn("[PF] lecture checkins échouée :", error.message);
     return data ?? [];
   },
   // Fraîcheur des références physio du roster (pas les valeurs, juste la date).
   async rosterRefs(athleteIds) {
     if (!athleteIds?.length) return [];
-    const { data } = await sb.from("athlete_profiles").select("user_id, updated_at")
+    const { data, error } = await sb.from("athlete_profiles").select("user_id, updated_at")
       .in("user_id", athleteIds);
+    if (error) console.warn("[PF] lecture athlete_profiles échouée :", error.message);
     return data ?? [];
   },
   // ---- Notification du matin (récap séances + matériel) ----
   // Préférences : heure d'envoi, fuseau, canal (email | push | both | none).
   async getNotifPrefs() {
-    const { data } = await sb.from("notification_prefs")
+    const { data, error } = await sb.from("notification_prefs")
       .select("send_hour, send_minute, tz, channel").maybeSingle();
+    if (error) console.warn("[PF] lecture notification_prefs échouée :", error.message);
     return data;
   },
   async saveNotifPrefs({ hour, minute, tz, channel }) {
@@ -370,9 +384,10 @@ export const PF = {
 
   // planning[date] -> séances de l'athlète sur une fenêtre de dates
   async getPlanning(athleteId, fromIso, toIso) {
-    const { data } = await sb.from("scheduled_sessions").select("*")
+    const { data, error } = await sb.from("scheduled_sessions").select("*")
       .eq("athlete_id", athleteId).gte("date", fromIso).lte("date", toIso)
       .order("date");
+    if (error) console.warn("[PF] lecture scheduled_sessions échouée :", error.message);
     return data ?? [];
   },
   async scheduleSession(athleteId, dateIso, s) {
@@ -406,8 +421,9 @@ export const PF = {
 
   // -------- FEEDBACK HEBDO BIDIRECTIONNEL --------
   async getWeekPulse(athleteId, weekMonday) {
-    const { data } = await sb.from("week_pulses").select("*")
+    const { data, error } = await sb.from("week_pulses").select("*")
       .eq("athlete_id", athleteId).eq("week_monday", weekMonday).maybeSingle();
+    if (error) console.warn("[PF] lecture week_pulses échouée :", error.message);
     return data;
   },
   async saveMyWeekFeel(weekMonday, feel, note) {
@@ -425,8 +441,9 @@ export const PF = {
 
   // -------- DÉBRIEF POST-COURSE (journal de course de l'athlète) --------
   async getRaceDebriefs(athleteId = this.user.id) {
-    const { data } = await sb.from("race_debriefs").select("*")
+    const { data, error } = await sb.from("race_debriefs").select("*")
       .eq("athlete_id", athleteId).order("race_date", { ascending: false });
+    if (error) console.warn("[PF] lecture race_debriefs échouée :", error.message);
     return (data ?? []).map((d) => ({ race: d.race_name, date: d.race_date, result: d.result,
       felt: d.felt, nutrition: d.nutrition, weather: d.weather, good: d.good, bad: d.bad }));
   },
@@ -440,8 +457,9 @@ export const PF = {
 
   // -------- BIBLIOTHÈQUE DE SÉANCES (coach) --------
   async getTemplates() {
-    const { data } = await sb.from("sessions").select("*")
+    const { data, error } = await sb.from("sessions").select("*")
       .eq("owner_id", this.user.id).eq("is_template", true).order("created_at", { ascending: false });
+    if (error) console.warn("[PF] lecture sessions échouée :", error.message);
     return data ?? [];
   },
   async saveTemplate(s) {
@@ -455,9 +473,10 @@ export const PF = {
 
   // -------- COACH : roster d'athlètes --------
   async myAthletes() {
-    const { data } = await sb.from("coach_athlete")
+    const { data, error } = await sb.from("coach_athlete")
       .select("athlete_id, status, profiles:athlete_id(full_name, email)")
       .eq("coach_id", this.user.id).eq("status", "active");
+    if (error) console.warn("[PF] lecture coach_athlete échouée :", error.message);
     return data ?? [];
   },
   async linkAthlete(athleteId) {
@@ -491,15 +510,17 @@ export const PF = {
   // -------- CO-COACHING : plusieurs coachs par athlète --------
   // Équipe complète d'un athlète (tous les coachs actifs + leur étiquette de rôle).
   async getCoTeam(athleteId) {
-    const { data } = await sb.from("coach_athlete")
+    const { data, error } = await sb.from("coach_athlete")
       .select("id, coach_id, role_label, status, coach:coach_id(full_name, email)")
       .eq("athlete_id", athleteId).eq("status", "active");
+    if (error) console.warn("[PF] lecture coach_athlete échouée :", error.message);
     return data ?? [];
   },
   // Demandes d'ajout en attente pour cet athlète (visibles par l'athlète et ses coachs).
   async getPendingCoCoachRequests(athleteId) {
-    const { data } = await sb.from("co_coach_requests")
+    const { data, error } = await sb.from("co_coach_requests")
       .select("*").eq("athlete_id", athleteId).eq("status", "pending").order("created_at", { ascending: false });
+    if (error) console.warn("[PF] lecture co_coach_requests échouée :", error.message);
     return data ?? [];
   },
   // Un coach existant OU l'athlète propose l'ajout d'un coach (par email + rôle libre).
@@ -516,8 +537,9 @@ export const PF = {
     return new URLSearchParams(location.search).get("invite");
   },
   async myInvitations() {
-    const { data } = await sb.from("invitations").select("*")
+    const { data, error } = await sb.from("invitations").select("*")
       .eq("coach_id", this.user.id).order("created_at", { ascending: false });
+    if (error) console.warn("[PF] lecture invitations échouée :", error.message);
     return data ?? [];
   },
 
@@ -536,7 +558,8 @@ export const PF = {
 
   // -------- CLUB --------
   async myClubs() {
-    const { data } = await sb.from("clubs").select("*").eq("owner_id", this.user.id);
+    const { data, error } = await sb.from("clubs").select("*").eq("owner_id", this.user.id);
+    if (error) console.warn("[PF] lecture clubs échouée :", error.message);
     return data ?? [];
   },
   async createClub(name) {
@@ -545,16 +568,19 @@ export const PF = {
     if (error) throw error; return data;
   },
   async getClubMembers(clubId) {
-    const { data } = await sb.from("club_members").select("*, club_groups(name,color)").eq("club_id", clubId);
+    const { data, error } = await sb.from("club_members").select("*, club_groups(name,color)").eq("club_id", clubId).limit(1000);
+    if (error) console.warn("[PF] lecture club_members échouée :", error.message);
     return data ?? [];
   },
   async getCreneaux(clubId) {
-    const { data } = await sb.from("creneaux").select("*").eq("club_id", clubId).order("day");
+    const { data, error } = await sb.from("creneaux").select("*").eq("club_id", clubId).order("day");
+    if (error) console.warn("[PF] lecture creneaux échouée :", error.message);
     return data ?? [];
   },
   // -------- CLUB : groupes & affectation des membres --------
   async getGroups(clubId) {
-    const { data } = await sb.from("club_groups").select("*").eq("club_id", clubId);
+    const { data, error } = await sb.from("club_groups").select("*").eq("club_id", clubId);
+    if (error) console.warn("[PF] lecture club_groups échouée :", error.message);
     return data ?? [];
   },
   // Crée (sans id) ou met à jour (avec id) un groupe. Renvoie la ligne (id DB).
@@ -590,7 +616,8 @@ export const PF = {
   // -------- CLUB : les 3 formules & encaissement (Stripe) --------
   // Les tarifs des 3 formules (dropin/sub/coach), éditables par le club.
   async getClubOffers(clubId) {
-    const { data } = await sb.from("club_offers").select("*").eq("club_id", clubId);
+    const { data, error } = await sb.from("club_offers").select("*").eq("club_id", clubId);
+    if (error) console.warn("[PF] lecture club_offers échouée :", error.message);
     return data ?? [];
   },
   // Met à jour le tarif d'une formule (gérant du club).
@@ -610,7 +637,8 @@ export const PF = {
   },
   // Adhésions du club (gérant : toutes ; membre : la sienne via RLS).
   async getClubMemberships(clubId) {
-    const { data } = await sb.from("club_memberships").select("*").eq("club_id", clubId);
+    const { data, error } = await sb.from("club_memberships").select("*").eq("club_id", clubId);
+    if (error) console.warn("[PF] lecture club_memberships échouée :", error.message);
     return data ?? [];
   },
   // Démarre l'onboarding Stripe Connect du club (gérant) → redirige Stripe.
@@ -630,7 +658,8 @@ export const PF = {
   },
   // Liste des comptes liés (sans jetons — via la vue `my_devices`).
   async myDevices() {
-    const { data } = await sb.from("my_devices").select("*");
+    const { data, error } = await sb.from("my_devices").select("*");
+    if (error) console.warn("[PF] lecture my_devices échouée :", error.message);
     return data ?? [];
   },
   async isDeviceConnected(provider = "strava") {

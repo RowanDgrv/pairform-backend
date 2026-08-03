@@ -17,7 +17,10 @@ Deno.serve(async (req) => {
   let payload: any;
   try { payload = await req.json(); } catch { return OK(); }
 
-  queueMicrotask(() => ingest(payload).catch((e) => console.error("coros-webhook:", e)));
+  // EdgeRuntime.waitUntil (pas queueMicrotask) : garantit que le runtime garde
+  // l'isolate vivant jusqu'à la fin du traitement en arrière-plan, même après
+  // que la réponse HTTP ci-dessous soit déjà partie (constat audit 03/08/2026).
+  EdgeRuntime.waitUntil(ingest(payload).catch((e) => console.error("coros-webhook:", e)));
   return OK();
 });
 

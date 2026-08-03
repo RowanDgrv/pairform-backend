@@ -33,7 +33,11 @@ Deno.serve(async (req) => {
 
   // On ne traite que les activités créées/mises à jour.
   if (evt?.object_type === "activity" && (evt.aspect_type === "create" || evt.aspect_type === "update")) {
-    queueMicrotask(() => processActivity(evt).catch((e) => console.error("webhook:", e)));
+    // EdgeRuntime.waitUntil (pas queueMicrotask) : garantit que le runtime
+    // garde l'isolate vivant jusqu'à la fin du traitement en arrière-plan,
+    // même après que la réponse HTTP ci-dessous soit déjà partie (constat
+    // audit 03/08/2026).
+    EdgeRuntime.waitUntil(processActivity(evt).catch((e) => console.error("webhook:", e)));
   }
   // (aspect_type 'delete' → on pourrait supprimer la ligne ; volontairement ignoré ici.)
 
