@@ -224,6 +224,21 @@ export const PF = {
   async retireGear(id) {
     return await this.updateGear(id, { retired: true });
   },
+  // Jour deadline du coach pour la planification hebdo (rappel H-72/48/24).
+  async getWeekDeadlineDay() {
+    const { data, error } = await sb.from("profiles").select("week_deadline_day").eq("id", this.user.id).single();
+    if (error) { console.warn("getWeekDeadlineDay:", error.message); return null; }
+    return data?.week_deadline_day ?? null;
+  },
+  async setWeekDeadlineDay(day) {
+    const { error } = await sb.from("profiles").update({ week_deadline_day: day }).eq("id", this.user.id);
+    if (error) throw error;
+    return true;
+  },
+  // Prévient l'athlète que sa semaine (week_monday = date ISO du lundi) est prête.
+  async notifyWeekReady(athleteId, weekMonday) {
+    return await this._invoke("notify-week-ready", { athlete_id: athleteId, week_monday: weekMonday });
+  },
   // Démarre l'onboarding Stripe Connect du COACH (pour facturer ses athlètes).
   async connectCoachStripe() {
     const { url } = await this._invoke("coach-connect", {});
