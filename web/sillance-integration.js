@@ -16,8 +16,16 @@
 import { PF } from "./sillance-client.js";
 window.PF = PF;
 
+function tr(key, vars) { return window.SilI18n ? window.SilI18n.t(key, vars) : key; }
+
 const A = () => window.__pf_app;   // raccourci vers le hook de l'app
 const TRIAL_DAYS = 14;             // durée de l'essai gratuit coach (jours)
+
+// Comptes modérateurs Sillance : jamais de paywall/essai limité, quel que
+// soit le rôle. Volontairement une liste en dur (front only, pas de colonne
+// admin en base) — usage interne, à étendre ici si besoin d'un 2e compte.
+const ADMIN_EMAILS = ["rowandegraeve@gmail.com"];
+const isAdminUser = () => ADMIN_EMAILS.includes((PF.user?.email || "").toLowerCase());
 
 /* -------- mur de connexion (site officiel) --------
    La démo (sillance-app.html sans paramètre) ne change pas : connexion via
@@ -146,7 +154,7 @@ async function hydrate() {
     } catch (e) { console.warn("[PF] rosterRefs :", e); }
     const list = rows.map((r) => ({
       id: r.athlete_id,
-      name: esc(r.profiles?.full_name || r.profiles?.email) || "Athlète",
+      name: esc(r.profiles?.full_name || r.profiles?.email) || tr("mode.athlete"),
       checkin: ckByAth[r.athlete_id] || null,
       refsUpdatedAt: refsByAth[r.athlete_id] || null,
     }));
@@ -234,7 +242,7 @@ async function hydrate() {
         app.replaceArray(app.data.CLUB_GROUPS, []);
         app.replaceArray(app.data.CRENEAUX, []);
         const el = document.getElementById("clubName");
-        if (el) el.textContent = "Mon club";
+        if (el) el.textContent = tr("club.myClubFallback");
         return;
       }
       const club = clubs[0];
@@ -257,10 +265,12 @@ async function hydrate() {
 
     // Gate premium : masque/déverrouille le contenu payant selon l'abonnement.
     section("premium", async () => {
-      const ok = await PF.isSubscribed();
+      const admin = isAdminUser();
+      const ok = admin || await PF.isSubscribed();
       document.body.classList.toggle("pf-subscribed", ok);
       window.__pf_subscribed = ok;
       // Essai gratuit + paywall du coach (l'abo 29€ est le produit Phase 1).
+      // Compte modérateur : jamais de compte à rebours, jamais bloqué.
       const role = PF.profile?.role;
       let trialDaysLeft = null, locked = false;
       if (role === "coach" && !ok) {
@@ -274,13 +284,13 @@ async function hydrate() {
       window.__pf_trial_days = trialDaysLeft;
       renderCoachGate({ subscribed: ok, role, trialDaysLeft, locked });
       // Vidéos : réservées aux athlètes que leur coach a activés (et payés).
-      const videosOk = role === "athlete" ? await PF.athleteHasVideos() : true;
+      const videosOk = admin || (role === "athlete" ? await PF.athleteHasVideos() : true);
       window.__pf_videos_ok = videosOk;
       renderVideoGate({ role, videosOk });
     }),
 
     section("aiAddon", async () => {
-      window.__pf_aiAddon = await PF.hasAiAddon();
+      window.__pf_aiAddon = isAdminUser() || await PF.hasAiAddon();
     }),
   ]);
 
@@ -385,14 +395,23 @@ function setCloudBadge(connected) {
   if (!b) {
     b = document.createElement("div");
     b.id = "pf-cloud-badge";
-    document.body.appendChild(b);
+    b.setAttribute("role", "button");
+    b.setAttribute("tabindex", "0");
+    // Rattaché au <header> plutôt qu'au body (audit a11y 04/08/2026, axe
+    // "region" : tout le contenu doit être dans un landmark) — sans impact
+    // visuel puisque le badge est en position:fixed (placé par rapport au
+    // viewport, pas à son parent DOM).
+    (document.querySelector("header") || document.body).appendChild(b);
+    b.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); b.click(); }
+    });
     b.addEventListener("click", () => {
-      if (PF.user) { if (confirm("Se déconnecter ?")) PF.signOut().then(() => location.reload()); }
+      if (PF.user) { if (confirm(tr("auth.confirmLogOut"))) PF.signOut().then(() => location.reload()); }
       else openAuth();
     });
   }
   b.classList.toggle("on", !!connected);
-  b.textContent = connected ? `☁︎ ${PF.profile?.full_name || "Connecté"}` : "☁︎ Se connecter";
+  b.textContent = connected ? `☁︎ ${PF.profile?.full_name || tr("auth.connected")}` : `☁︎ ${tr("auth.logIn")}`;
 }
 
 let authMode = gateMode ? "signup" : "signin";
@@ -429,23 +448,23 @@ function renderAuth() {
   const isUp = authMode === "signup";
   card.innerHTML = `
     <h2>Sillance</h2>
-    <p class="sub">${isUp ? "Crée ton compte" : "Connecte-toi à ton espace"}</p>
+    <p class="sub">${isUp ? tr("auth.createAccount") : tr("auth.logInToSpace")}</p>
     ${isUp ? `
-      <label>Nom complet</label><input id="pf-name" placeholder="Prénom Nom">
-      <label>Je suis…</label>
+      <label>${tr("auth.fullName")}</label><input id="pf-name" placeholder="${tr("auth.fullNamePh")}">
+      <label>${tr("auth.iAm")}</label>
       <div class="row-roles">
-        <div class="role" data-role="coach">Coach</div>
-        ${hardGate ? `` : `<div class="role" data-role="athlete">Athlète</div>`}
-        <div class="role" data-role="club_admin">Club</div>
+        <div class="role" data-role="coach">${tr("mode.coach")}</div>
+        ${hardGate ? `` : `<div class="role" data-role="athlete">${tr("mode.athlete")}</div>`}
+        <div class="role" data-role="club_admin">${tr("mode.club")}</div>
       </div>` : ``}
-    <label>Email</label><input id="pf-email" type="email" placeholder="toi@mail.com">
-    <label>Mot de passe</label><input id="pf-pass" type="password" placeholder="••••••••">
+    <label>${tr("common.email")}</label><input id="pf-email" type="email" placeholder="${tr("auth.emailPh")}">
+    <label>${tr("auth.password")}</label><input id="pf-pass" type="password" placeholder="••••••••">
     <div class="err" id="pf-err"></div>
-    ${isUp ? `<label class="pf-consent"><input type="checkbox" id="pf-consent"><span>J'accepte que Sillance traite mes données d'entraînement, y compris mes données de santé (check-ins, fréquence cardiaque), pour fournir le service. Voir la <a href="./legal.html#confidentialite" target="_blank" rel="noopener">politique de confidentialité</a>.</span></label>` : ``}
-    <button class="primary" id="pf-go">${isUp ? "Créer mon compte" : "Se connecter"}</button>
+    ${isUp ? `<label class="pf-consent"><input type="checkbox" id="pf-consent"><span>${tr("auth.consentText")} <a href="./legal.html#confidentialite" target="_blank" rel="noopener">${tr("auth.privacyPolicyLink")}</a>.</span></label>` : ``}
+    <button class="primary" id="pf-go">${isUp ? tr("auth.createMyAccount") : tr("auth.logIn")}</button>
     <div class="switch">${isUp
-      ? `Déjà un compte ? <a id="pf-switch">Se connecter</a>`
-      : `Pas encore de compte ? <a id="pf-switch">S'inscrire</a>`}</div>`;
+      ? `${tr("auth.alreadyAccount")} <a id="pf-switch">${tr("auth.logIn")}</a>`
+      : `${tr("auth.noAccountYet")} <a id="pf-switch">${tr("auth.signUp")}</a>`}</div>`;
 
   card.querySelectorAll(".role").forEach((r) => {
     r.classList.toggle("active", r.dataset.role === pickedRole);
@@ -463,19 +482,19 @@ async function submitAuth() {
   try {
     if (authMode === "signup") {
       const consent = document.getElementById("pf-consent");
-      if (consent && !consent.checked) { err.textContent = "Merci d'accepter le traitement de tes données pour créer ton compte."; return; }
+      if (consent && !consent.checked) { err.textContent = tr("auth.pleaseAcceptConsent"); return; }
       const fullName = document.getElementById("pf-name").value.trim();
       await PF.signUp({ email, password, fullName, role: pickedRole });
       // Selon la config Supabase, une confirmation email peut être requise.
       await PF.signIn({ email, password }).catch(() => {});
-      if (!PF.user) { err.textContent = "Compte créé. Vérifie ton email puis connecte-toi."; authMode = "signin"; renderAuth(); return; }
+      if (!PF.user) { err.textContent = tr("auth.accountCreatedCheckEmail"); authMode = "signin"; renderAuth(); return; }
     } else {
       await PF.signIn({ email, password });
     }
     closeAuth(true);
     await onLoggedIn();
   } catch (e) {
-    err.textContent = e?.message || "Erreur de connexion.";
+    err.textContent = e?.message || tr("auth.connectionError");
   }
 }
 
@@ -497,8 +516,8 @@ function injectGateStyles() {
     border-radius:99px;padding:5px 13px;font:700 12px 'Archivo',system-ui;cursor:pointer}
   #pf-trial-banner button:hover{filter:brightness(1.06)}
   #pf-lock-overlay{position:fixed;inset:0;z-index:9995;background:rgba(6,8,11,.9);
-    display:flex;align-items:center;justify-content:center;backdrop-filter:blur(6px)}
-  #pf-lock-overlay .card{max-width:420px;width:92%;background:#0f151b;border:1px solid #223;
+    display:flex;align-items:center;justify-content:center;backdrop-filter:blur(6px);padding:20px}
+  #pf-lock-overlay .card{max-width:560px;width:100%;max-height:92vh;overflow-y:auto;background:#0f151b;border:1px solid #223;
     border-radius:16px;padding:30px 28px;text-align:center;box-shadow:0 30px 80px -20px rgba(0,0,0,.7)}
   #pf-lock-overlay h2{font:800 22px/1.15 'Oswald','Archivo',system-ui;color:#eaf6f9;margin:0 0 8px;letter-spacing:.2px}
   #pf-lock-overlay p{font:400 14px/1.5 'Archivo',system-ui;color:#9fb0bb;margin:0 0 20px}
@@ -507,8 +526,25 @@ function injectGateStyles() {
   #pf-lock-overlay .go{width:100%;border:0;background:#46C2D8;color:#06222a;border-radius:11px;
     padding:13px;font:800 15px 'Archivo',system-ui;cursor:pointer;margin-top:16px}
   #pf-lock-overlay .go:hover{filter:brightness(1.06)}
+  #pf-lock-overlay .go:disabled{opacity:.5;cursor:not-allowed;filter:none}
   #pf-lock-overlay .out{display:inline-block;margin-top:14px;color:#7d8d98;font:500 12.5px 'Archivo';
     background:none;border:0;cursor:pointer;text-decoration:underline}
+  #pf-lock-overlay .tier-lbl{font:700 11px 'Archivo',system-ui;letter-spacing:.09em;text-transform:uppercase;
+    color:#7d8d98;text-align:left;margin:22px 0 10px}
+  #pf-lock-overlay .tier-picks{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+  #pf-lock-overlay .tierpick{border:1.5px solid #223;background:#141c24;border-radius:12px;
+    padding:14px 8px;cursor:pointer;text-align:center;font-family:'Archivo',system-ui;
+    display:flex;flex-direction:column;gap:4px;transition:border-color .12s,background .12s}
+  #pf-lock-overlay .tierpick:hover{border-color:#3a5560}
+  #pf-lock-overlay .tierpick:disabled{opacity:.55;cursor:wait}
+  #pf-lock-overlay .tierpick .tp-price{font:800 19px 'Oswald',system-ui;color:#eaf6f9}
+  #pf-lock-overlay .tierpick .tp-price small{font:600 10.5px 'Archivo';color:#7d8d98}
+  #pf-lock-overlay .tierpick .tp-cap{font:500 11px/1.3 'Archivo';color:#8ea0aa}
+  #pf-lock-overlay .tier-included{list-style:none;margin:16px 0 0;padding:0;text-align:left;
+    display:flex;flex-direction:column;gap:7px}
+  #pf-lock-overlay .tier-included li{font:400 12.5px/1.4 'Archivo',system-ui;color:#aebcc4;
+    display:flex;gap:8px;align-items:baseline}
+  #pf-lock-overlay .tier-included li::before{content:"✓";color:#46C2D8;font-weight:700;flex:none}
   #videolib.pf-vlocked > :not(h2):not(#pf-video-teaser){display:none!important}
   #pf-video-teaser{border:1px dashed #2a3b44;border-radius:12px;padding:26px 20px;margin-top:14px;
     text-align:center;background:rgba(70,194,216,.04)}
@@ -530,19 +566,46 @@ function renderCoachGate({ subscribed, role, trialDaysLeft, locked }) {
   if (subscribed || role !== "coach") return;   // abonné ou pas coach → rien
 
   if (locked) {
+    const TIERS = [
+      { n: 1, price: 19, cap: tr("gate.tier1.cap") },
+      { n: 2, price: 29, cap: tr("gate.tier2.cap") },
+      { n: 3, price: 49, cap: tr("gate.tier3.cap") },
+    ];
     const o = document.createElement("div");
     o.id = "pf-lock-overlay";
     o.innerHTML = `
       <div class="card">
-        <h2>Ton essai gratuit est terminé</h2>
-        <p>Abonne-toi à Sillance pour continuer à coacher tes athlètes, planifier et analyser.</p>
-        <div class="price">29 €<small> /mois</small></div>
-        <button class="go" id="pf-lock-go">S'abonner à Sillance</button>
-        <button class="out" id="pf-lock-out">Se déconnecter</button>
+        <h2>${tr("gate.trialOverHeading")}</h2>
+        <p>${tr("gate.trialOverText2")}</p>
+        <div class="tier-lbl">${tr("gate.pickTier")}</div>
+        <div class="tier-picks">
+          ${TIERS.map((t) => `
+            <button class="tierpick" data-tier="${t.n}">
+              <span class="tp-price">${t.price}&nbsp;€<small> ${tr("gate.perMonth")}</small></span>
+              <span class="tp-cap">${t.cap}</span>
+            </button>`).join("")}
+        </div>
+        <div class="tier-lbl">${tr("gate.includedTitle")}</div>
+        <ul class="tier-included">
+          <li>${tr("gate.included.f1")}</li>
+          <li>${tr("gate.included.f2")}</li>
+          <li>${tr("gate.included.f3")}</li>
+          <li>${tr("gate.included.f4")}</li>
+          <li>${tr("gate.included.f5")}</li>
+        </ul>
+        <button class="out" id="pf-lock-out">${tr("auth.logOut")}</button>
       </div>`;
     document.body.appendChild(o);
-    o.querySelector("#pf-lock-go").onclick = () =>
-      PF.startCheckout("coach").catch((e) => console.warn("[PF] checkout:", e));
+    o.querySelectorAll(".tierpick").forEach((btn) => {
+      btn.onclick = () => {
+        o.querySelectorAll(".tierpick").forEach((b) => (b.disabled = true));
+        btn.querySelector(".tp-price").textContent = tr("gate.selecting");
+        PF.startCheckout("coach", Number(btn.dataset.tier)).catch((e) => {
+          console.warn("[PF] checkout:", e);
+          o.querySelectorAll(".tierpick").forEach((b) => (b.disabled = false));
+        });
+      };
+    });
     o.querySelector("#pf-lock-out").onclick = async () => {
       try { await PF.signOut(); } catch (_) {} location.reload();
     };
@@ -552,9 +615,9 @@ function renderCoachGate({ subscribed, role, trialDaysLeft, locked }) {
   if (trialDaysLeft != null) {
     const b = document.createElement("div");
     b.id = "pf-trial-banner";
-    const j = trialDaysLeft <= 1 ? "dernier jour" : `${trialDaysLeft} jours restants`;
-    b.innerHTML = `🎁 Essai gratuit — <b>${j}</b>
-      <button id="pf-trial-go">S'abonner (29 €/mois)</button>`;
+    const j = trialDaysLeft <= 1 ? tr("gate.lastDay") : tr("gate.daysLeft", { n: trialDaysLeft });
+    b.innerHTML = `🎁 ${tr("gate.freeTrial")} — <b>${j}</b>
+      <button id="pf-trial-go">${tr("gate.subscribePrice")}</button>`;
     document.body.appendChild(b);
     document.body.style.paddingTop = b.offsetHeight + "px";
     b.querySelector("#pf-trial-go").onclick = () =>
@@ -575,8 +638,8 @@ function renderVideoGate({ role, videosOk }) {
     if (!teaser) {
       teaser = document.createElement("div");
       teaser.id = "pf-video-teaser";
-      teaser.innerHTML = `<div class="t">🔒 Vidéos d'exercices réservées</div>
-        <div class="s">Ton coach peut débloquer les vidéos de démonstration pour toi.<br>Demande-lui d'activer l'option dans son espace.</div>`;
+      teaser.innerHTML = `<div class="t">🔒 ${tr("gate.videosLockedTitle")}</div>
+        <div class="s">${tr("gate.videosLockedText1")}<br>${tr("gate.videosLockedText2")}</div>`;
       lib.appendChild(teaser);
     }
   } else if (teaser) {
