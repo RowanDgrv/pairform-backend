@@ -16,6 +16,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import * as webpush from "jsr:@negrel/webpush@0.3.0";
 import { corsHeaders } from "../_shared/cors.ts";
 import { sendEmail } from "../_shared/email.ts";
+import { sendFcmPush } from "../_shared/fcm.ts";
+import { sendApnsPush } from "../_shared/apns.ts";
 
 const DISC_LABEL: Record<string, string> = {
   swim: "Natation", bike: "Vélo", run: "Course", strength: "Renfo", hyrox: "Hyrox", tri: "Triathlon",
@@ -152,10 +154,24 @@ Deno.serve(async (req) => {
           }
         })(),
         (async () => {
-          if (!appServer || (p.channel !== "push" && p.channel !== "both")) return;
+          if (p.channel !== "push" && p.channel !== "both") return;
           const { data: subs } = await supabase.from("push_subscriptions")
-            .select("id, endpoint, p256dh, auth").eq("user_id", p.user_id);
+            .select("id, endpoint, p256dh, auth, platform").eq("user_id", p.user_id);
+          // Lu côté client au tap (silOnNotificationTap) pour amener directement
+          // l'athlète sur sa vue plutôt que sur l'écran par défaut de l'app.
+          const pushData = { type: "morning_digest" };
           for (const s of subs ?? []) {
+            if (s.platform === "android") {
+              const r = await sendFcmPush(s.endpoint, { title, body: bodyTxt, data: pushData });
+              if (!r.ok && r.deadToken) await supabase.from("push_subscriptions").delete().eq("id", s.id);
+              continue;
+            }
+            if (s.platform === "ios") {
+              const r = await sendApnsPush(s.endpoint, { title, body: bodyTxt, data: pushData });
+              if (!r.ok && r.deadToken) await supabase.from("push_subscriptions").delete().eq("id", s.id);
+              continue;
+            }
+            if (!appServer) continue;
             try {
               const subscriber = appServer.subscribe({
                 endpoint: s.endpoint,
