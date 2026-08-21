@@ -114,15 +114,6 @@ async function hydrate() {
   showHydrateLoader();
   const uid = PF.user.id;
 
-  // Compte réel = un seul rôle réel : verrouille les 2 autres vues (Coach/
-  // Athlète/Club) et bascule sur la sienne. Sans ça, un vrai utilisateur
-  // pouvait cliquer librement sur les 3 portes — pensées pour la démo/preview
-  // publique, pas pour un compte connecté.
-  if (typeof window.__pf_lockModes === "function" && PF.profile?.role) {
-    const realMode = PF.profile.role === "club_admin" ? "club" : PF.profile.role;
-    window.__pf_lockModes(realMode);
-  }
-
   // Une seule dépendance réelle dans toute l'hydratation : "planning" a besoin
   // de defaultAthleteId, calculé par "coachAthletes". Celle-ci doit donc
   // rester séquentielle et passer avant tout le reste ; les 12 autres sections
@@ -161,8 +152,22 @@ async function hydrate() {
     // Un coach avec des athlètes liés planifie par défaut pour le premier
     // (plus utile que "pour soi-même" dans le cas d'usage réel).
     if (PF.profile?.role === "coach" && list.length) defaultAthleteId = list[0].id;
+    // Auto-coaching : le coach s'est ajouté à son propre roster (self-coach
+    // edge function) — débloque en plus la vue Athlète pour lui (mode.js).
+    window.__pf_selfCoached = rows.some((r) => r.athlete_id === uid);
     app.setCoachAthletes?.(list, defaultAthleteId);
   });
+
+  // Compte réel = un seul rôle réel : verrouille les 2 autres vues (Coach/
+  // Athlète/Club) et bascule sur la sienne (sauf auto-coaching, ci-dessus,
+  // qui débloque aussi Athlète pour un coach). Sans ça, un vrai utilisateur
+  // pouvait cliquer librement sur les 3 portes — pensées pour la démo/preview
+  // publique, pas pour un compte connecté. Doit tourner APRÈS "coachAthletes"
+  // puisque __pf_lockModes lit window.__pf_selfCoached calculé ci-dessus.
+  if (typeof window.__pf_lockModes === "function" && PF.profile?.role) {
+    const realMode = PF.profile.role === "club_admin" ? "club" : PF.profile.role;
+    window.__pf_lockModes(realMode);
+  }
 
   // Les 13 sections restantes sont indépendantes entre elles (chacune isolée
   // par section(), une erreur ne bloque pas les autres) : parallélisées au
@@ -266,6 +271,7 @@ async function hydrate() {
     // Gate premium : masque/déverrouille le contenu payant selon l'abonnement.
     section("premium", async () => {
       const admin = isAdminUser();
+      window.__pf_isAdmin = admin;
       const ok = admin || await PF.isSubscribed();
       document.body.classList.toggle("pf-subscribed", ok);
       window.__pf_subscribed = ok;

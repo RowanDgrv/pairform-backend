@@ -509,6 +509,11 @@ export const PF = {
   async acceptInvite(token) {
     return await this._invoke("accept-invite", { token });
   },
+  // Coach : se rattache lui-même comme son propre athlète (self-coaching),
+  // compte dans son propre quota d'athlètes (palier de prix).
+  async enableSelfCoaching() {
+    return await this._invoke("self-coach", {});
+  },
   // -------- MODE SPECTATEUR (lien public, sans compte) --------
   // Crée ou réutilise le lien pour cette course précise (idempotent par
   // athlète+course+date). Écriture directe : pas d'usurpation possible,
