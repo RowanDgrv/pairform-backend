@@ -6,6 +6,11 @@
 import { admin } from "../_shared/providers.ts";
 import { garminImportRecent } from "../_shared/garmin.ts";
 
+// Global injecté par le runtime Supabase Edge Functions (Deno Deploy), absent
+// des types Deno standards — `deno check` en CI (sans ce runtime) ne le
+// connaît pas sans cette déclaration ambiante.
+declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void };
+
 Deno.serve(async (req) => {
   if (req.method !== "POST") return new Response("ok");
   let payload: any;

@@ -7,6 +7,11 @@
 import { admin } from "../_shared/providers.ts";
 import { corosImportRecent } from "../_shared/coros.ts";
 
+// Global injecté par le runtime Supabase Edge Functions (Deno Deploy), absent
+// des types Deno standards — `deno check` en CI (sans ce runtime) ne le
+// connaît pas sans cette déclaration ambiante.
+declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void };
+
 const OK = () =>
   new Response(JSON.stringify({ message: "ok", result: "0000" }), {
     status: 200, headers: { "Content-Type": "application/json" },

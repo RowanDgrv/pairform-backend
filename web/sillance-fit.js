@@ -23,6 +23,8 @@
 (function (root) {
   "use strict";
 
+  function tr(key, vars) { return root.SilI18n ? root.SilI18n.t(key, vars) : key; }
+
   const NEUTRAL_COND = { temp: 15, humidity: 50, wind: 0, windHead: false };
   const FIT_EPOCH_OFFSET = 631065600; // secondes entre 1970-01-01 et 1989-12-31 (epoch FIT)
 
@@ -36,24 +38,24 @@
             const { raw, disc } = readFitArrayBuffer(r.result);
             resolve(finishParse(raw, disc, [], opts, "FIT"));
           } catch (e) {
-            resolve({ ok: false, error: "Fichier .FIT illisible : " + (e && e.message ? e.message : e) });
+            resolve({ ok: false, error: tr("fitImport.unreadableFit") + " : " + (e && e.message ? e.message : e) });
           }
         };
-        r.onerror = () => resolve({ ok: false, error: "Lecture du fichier impossible." });
+        r.onerror = () => resolve({ ok: false, error: tr("fitImport.cannotReadFile") });
         r.readAsArrayBuffer(file);
       });
     }
     return new Promise((resolve) => {
       const r = new FileReader();
       r.onload = () => resolve(parse(String(r.result || ""), file.name || "", opts));
-      r.onerror = () => resolve({ ok: false, error: "Lecture du fichier impossible." });
+      r.onerror = () => resolve({ ok: false, error: tr("fitImport.cannotReadFile") });
       r.readAsText(file);
     });
   }
 
   function finishParse(raw, disc, lapsRaw, opts, source) {
     if (disc == null) disc = "run";
-    if (!raw || raw.length < 4) return { ok: false, error: "Pas assez de points GPS/capteur dans le fichier." };
+    if (!raw || raw.length < 4) return { ok: false, error: tr("fitImport.notEnoughPoints") };
     const data = buildData(raw, disc, lapsRaw, opts);
     const summary = {
       provider: "upload",
@@ -86,7 +88,7 @@
     const view = new DataView(buf);
     const bytes = new Uint8Array(buf);
     if (bytes.length < 14 || String.fromCharCode(bytes[8], bytes[9], bytes[10], bytes[11]) !== ".FIT") {
-      throw new Error("signature .FIT absente (fichier corrompu ou mauvais format)");
+      throw new Error(tr("fitImport.badFitSignature"));
     }
     const headerSize = bytes[0];
     const dataSize = view.getUint32(4, true);
@@ -239,7 +241,7 @@
       else return { ok: false, error: "Format non reconnu (attendu .tcx ou .gpx)." };
 
       if (disc == null) disc = guessDiscFromName(name);
-      if (!raw || raw.length < 4) return { ok: false, error: "Pas assez de points GPS/capteur dans le fichier." };
+      if (!raw || raw.length < 4) return { ok: false, error: tr("fitImport.notEnoughPoints") };
 
       const data = buildData(raw, disc, lapsRaw, opts);
       const summary = {
@@ -258,7 +260,7 @@
       };
       return { ok: true, summary, data };
     } catch (e) {
-      return { ok: false, error: "Erreur de lecture : " + (e && e.message ? e.message : e) };
+      return { ok: false, error: tr("fitImport.readError") + " : " + (e && e.message ? e.message : e) };
     }
   }
 
@@ -438,7 +440,7 @@
   /* ---------- utils ---------- */
   function titleFor(disc, data) {
     const km = data.dist >= 1 ? data.dist.toFixed(1) + " km" : "";
-    const D = { run: "Course", bike: "Sortie vélo", swim: "Natation", strength: "Renforcement" }[disc] || "Activité";
+    const D = { run: tr("disc.run"), bike: tr("fitImport.bikeRide"), swim: tr("disc.swim"), strength: tr("disc.strength") }[disc] || tr("fitImport.activityFallback");
     return (D + (km ? " · " + km : "")).trim();
   }
   function mapSport(s) {

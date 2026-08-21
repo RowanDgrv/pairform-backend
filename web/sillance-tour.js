@@ -7,28 +7,30 @@
 (function(global){
   'use strict';
 
+  function tr(key, vars){ return global.SilI18n ? global.SilI18n.t(key, vars) : key; }
+
   var STEPS = [
-    { id:'welcome', target:null, title:'Bienvenue sur Sillance !',
-      text:"On va créer ta première séance ensemble — une séance de course à pied, avec échauffement, un intervalle d'effort et une récupération.",
-      cta:"C'est parti" },
-    { id:'create', target:'#createSessionBtn', title:'Créer une séance',
-      text:"Clique sur ce bouton pour ouvrir le créateur de séance.", wait:'click' },
-    { id:'sport', target:'#bDiscPick', title:'Choisis le sport',
-      text:"Sélectionne « Course à pied » pour cette démo.", wait:'change',
+    { id:'welcome', target:null, get title(){return tr('tour.welcome.title')},
+      get text(){return tr('tour.welcome.text')},
+      get cta(){return tr('tour.welcome.cta')} },
+    { id:'create', target:'#createSessionBtn', get title(){return tr('tour.create.title')},
+      get text(){return tr('tour.create.text')}, wait:'click' },
+    { id:'sport', target:'#bDiscPick', get title(){return tr('tour.sport.title')},
+      get text(){return tr('tour.sport.text')}, wait:'change',
       accept:function(el){ return el.value==='run'; } },
-    { id:'warmup', target:'#bBlocks .bk:first-child .bk-lines .ln', title:'Échauffement déjà prêt',
-      text:"Un échauffement est ajouté automatiquement à chaque séance. Tu peux ajuster sa durée ou son intensité ici.",
-      cta:'Suivant' },
-    { id:'addexo', target:'#bBlocks .bk:nth-child(2) [data-add="exo"]', title:'Ajoute un exercice',
-      text:"Clique pour ajouter un intervalle d'effort à ce bloc.", wait:'click' },
-    { id:'intensity', target:'#bBlocks .bk:nth-child(2) .bk-lines .ln:last-child .ln-zonesel', title:"Règle l'intensité",
-      text:"Choisis une zone d'intensité pour cet effort — par exemple Seuil ou VMA.", wait:'change' },
-    { id:'recov', target:'#bBlocks .bk:nth-child(2) [data-add="recov"]', title:'Ajoute une récupération',
-      text:"Clique pour ajouter une récupération après l'effort.", wait:'click' },
-    { id:'series', target:'#bBlocks .bk:nth-child(2) [data-f="series"]', title:'Crée des intervalles',
-      text:"Augmente le nombre de séries pour répéter ce bloc plusieurs fois : c'est ça, un intervalle. Essaie ×5.", wait:'input' },
-    { id:'save', target:'#bSaveCal', title:'Enregistre la séance',
-      text:"Ta séance est prête ! Clique pour l'ajouter au calendrier.", wait:'click' }
+    { id:'warmup', target:'#bBlocks .bk:first-child .bk-lines .ln', get title(){return tr('tour.warmup.title')},
+      get text(){return tr('tour.warmup.text')},
+      get cta(){return tr('tour.warmup.cta')} },
+    { id:'addexo', target:'#bBlocks .bk:nth-child(2) [data-add="exo"]', get title(){return tr('tour.addexo.title')},
+      get text(){return tr('tour.addexo.text')}, wait:'click' },
+    { id:'intensity', target:'#bBlocks .bk:nth-child(2) .bk-lines .ln:last-child .ln-zonesel', get title(){return tr('tour.intensity.title')},
+      get text(){return tr('tour.intensity.text')}, wait:'change' },
+    { id:'recov', target:'#bBlocks .bk:nth-child(2) [data-add="recov"]', get title(){return tr('tour.recov.title')},
+      get text(){return tr('tour.recov.text')}, wait:'click' },
+    { id:'series', target:'#bBlocks .bk:nth-child(2) [data-f="series"]', get title(){return tr('tour.series.title')},
+      get text(){return tr('tour.series.text')}, wait:'input' },
+    { id:'save', target:'#bSaveCal', get title(){return tr('tour.save.title')},
+      get text(){return tr('tour.save.text')}, wait:'click' }
   ];
 
   var active = false;
@@ -98,14 +100,14 @@
 
   function renderCallout(step){
     var stepNo = currentIndex + 1;
-    var html = '<div class="stc-step">Étape ' + stepNo + ' / ' + STEPS.length + '</div>'
+    var html = '<div class="stc-step">' + tr('tour.stepCounter', {n:stepNo, total:STEPS.length}) + '</div>'
       + '<div class="stc-title">' + step.title + '</div>'
       + '<div class="stc-text">' + step.text + '</div>';
     if(step.cta){
-      html += '<div class="stc-row"><button class="stc-skip" data-stc-skip type="button">Passer le tuto</button><button class="stc-cta" data-stc-cta type="button">' + step.cta + '</button></div>';
+      html += '<div class="stc-row"><button class="stc-skip" data-stc-skip type="button">' + tr('tour.skip') + '</button><button class="stc-cta" data-stc-cta type="button">' + step.cta + '</button></div>';
     } else {
-      html += '<div class="stc-hint"><span class="chev">→</span> Clique sur l\'élément en surbrillance</div>'
-        + '<button class="stc-skip" data-stc-skip type="button">Passer le tuto</button>';
+      html += '<div class="stc-hint"><span class="chev">→</span> ' + tr('tour.clickHighlighted') + '</div>'
+        + '<button class="stc-skip" data-stc-skip type="button">' + tr('tour.skip') + '</button>';
     }
     calloutEl.innerHTML = html;
     var ctaBtn = calloutEl.querySelector('[data-stc-cta]');
@@ -161,11 +163,21 @@
   function isRendered(el){ return !!el && el.getClientRects().length > 0; }
 
   function updatePosition(){
+    rafId = null;
     if(!active || !currentStep) return;
     if(!isCoachMode()){ finishTour(false); return; }
     var el = qs(currentStep.target);
     if(currentStep.target && !isRendered(el)){ finishTour(false); return; }
     positionFor(currentStep, el);
+  }
+  // Repositionne au resize/scroll plutôt qu'en boucle sur chaque frame (perf
+  // 04/08/2026) : l'ancienne version se rappelait via requestAnimationFrame
+  // indéfiniment tant qu'une étape attendait un clic — coûteux en reflow forcé
+  // (getBoundingClientRect + écritures de style à chaque frame), mesuré comme
+  // la première cause du TBT/LCP tardifs en audit Lighthouse.
+  function scheduleReposition(){
+    if(!active) return;
+    if(rafId) cancelAnimationFrame(rafId);
     rafId = requestAnimationFrame(updatePosition);
   }
 
@@ -176,8 +188,6 @@
     if(step.target && !isRendered(el)){ finishTour(false); return; }
     if(el && el.scrollIntoView) el.scrollIntoView({block:'center', inline:'nearest'});
     positionFor(step, el);
-    if(rafId) cancelAnimationFrame(rafId);
-    rafId = requestAnimationFrame(updatePosition);
   }
 
   function advance(){
@@ -204,7 +214,7 @@
     setHyroxOptionVisible(true);
     try{ localStorage.setItem('sil_tour_done', completed ? '1' : 'skipped'); }catch(e){}
     if(completed && typeof global.toast === 'function'){
-      global.toast('Bravo ! Ta première séance de course à pied est prête 🎉');
+      global.toast(tr('tour.finishToast'));
     }
   }
 
@@ -241,6 +251,8 @@
     document.addEventListener('click', onDomEvent, true);
     document.addEventListener('change', onDomEvent, true);
     document.addEventListener('input', onDomEvent, true);
+    window.addEventListener('resize', scheduleReposition);
+    window.addEventListener('scroll', scheduleReposition, true);
     var btn = document.getElementById('tutoBtn');
     if(btn) btn.addEventListener('click', start);
     maybeAutoLaunch();
