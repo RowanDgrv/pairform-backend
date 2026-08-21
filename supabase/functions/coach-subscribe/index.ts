@@ -100,8 +100,8 @@ Deno.serve(async (req) => {
       subscription_data,
       metadata: { kind: "coaching_subscription", coach_id, athlete_id: athleteId, offer_id: offer.id },
       allow_promotion_codes: true,
-      success_url: `${APP_URL}/?coaching=success`,
-      cancel_url: `${APP_URL}/?coaching=cancel`,
+      success_url: `${APP_URL}/sillance-app.html?coaching=success`,
+      cancel_url: `${APP_URL}/sillance-app.html?coaching=cancel`,
     });
 
     // L'abonnement réel sera écrit par le webhook (source de vérité).

@@ -35,7 +35,7 @@ Deno.serve(async (req) => {
 
     const session = await stripe.billingPortal.sessions.create({
       customer: profile.stripe_customer_id,
-      return_url: `${APP_URL}/?portal=return`,
+      return_url: `${APP_URL}/sillance-app.html?portal=return`,
     });
     return json({ url: session.url });
   } catch (e) {

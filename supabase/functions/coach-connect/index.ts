@@ -60,8 +60,8 @@ Deno.serve(async (req) => {
     // Lien d'onboarding (à ouvrir par le coach pour compléter ses infos KYC).
     const link = await stripe.accountLinks.create({
       account: accountId,
-      refresh_url: `${APP_URL}/?coach_connect=refresh`,
-      return_url: `${APP_URL}/?coach_connect=done`,
+      refresh_url: `${APP_URL}/sillance-app.html?coach_connect=refresh`,
+      return_url: `${APP_URL}/sillance-app.html?coach_connect=done`,
       type: "account_onboarding",
     });
 

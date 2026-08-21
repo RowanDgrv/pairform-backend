@@ -106,8 +106,8 @@ Deno.serve(async (req) => {
       subscription_data: { metadata: subMeta },
       metadata: subMeta,
       allow_promotion_codes: true,
-      success_url: `${APP_URL}/?checkout=success`,
-      cancel_url: `${APP_URL}/?checkout=cancel`,
+      success_url: `${APP_URL}/sillance-app.html?checkout=success`,
+      cancel_url: `${APP_URL}/sillance-app.html?checkout=cancel`,
     });
 
     return json({ url: session.url });

@@ -51,7 +51,7 @@ Deno.serve(async (req) => {
       row = ins;
     }
 
-    const inviteUrl = `${APP_URL}/?invite=${row.token}`;
+    const inviteUrl = `${APP_URL}/sillance-app.html?invite=${row.token}`;
 
     // Envoi de l'email (Resend). Si la clé n'est pas configurée, `emailed`=false
     // et le coach partage le lien manuellement — le flux reste fonctionnel.

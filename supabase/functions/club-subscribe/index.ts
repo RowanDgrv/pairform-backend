@@ -114,8 +114,8 @@ Deno.serve(async (req) => {
       subscription_data,
       metadata: { kind: "club_membership", club_id, member_id, tier },
       allow_promotion_codes: true,
-      success_url: `${APP_URL}/?club_sub=success`,
-      cancel_url: `${APP_URL}/?club_sub=cancel`,
+      success_url: `${APP_URL}/sillance-app.html?club_sub=success`,
+      cancel_url: `${APP_URL}/sillance-app.html?club_sub=cancel`,
     });
 
     // L'adhésion réelle sera écrite par le webhook (source de vérité).

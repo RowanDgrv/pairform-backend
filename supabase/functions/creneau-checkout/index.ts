@@ -48,8 +48,8 @@ Deno.serve(async (req) => {
         },
       }],
       metadata: { kind: "creneau", creneau_id, member_id },
-      success_url: `${APP_URL}/?creneau=paid`,
-      cancel_url: `${APP_URL}/?creneau=cancel`,
+      success_url: `${APP_URL}/sillance-app.html?creneau=paid`,
+      cancel_url: `${APP_URL}/sillance-app.html?creneau=cancel`,
     });
 
     // Trace le paiement en attente.

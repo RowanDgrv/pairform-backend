@@ -118,8 +118,8 @@ Deno.serve(async (req) => {
       subscription_data: { metadata: { kind: "video_seats", coach_id: coachId } },
       metadata: { kind: "video_seats", coach_id: coachId },
       allow_promotion_codes: true,
-      success_url: `${APP_URL}/?videos=success`,
-      cancel_url: `${APP_URL}/?videos=cancel`,
+      success_url: `${APP_URL}/sillance-app.html?videos=success`,
+      cancel_url: `${APP_URL}/sillance-app.html?videos=cancel`,
     });
 
     return json({ url: session.url, seats });

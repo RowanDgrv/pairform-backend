@@ -77,8 +77,8 @@ Deno.serve(async (req) => {
       // carte exigée même pendant l'essai → débit automatique à J+14 sans action
       payment_method_collection: "always",
       allow_promotion_codes: true,
-      success_url: `${APP_URL}/?ai=success`,
-      cancel_url: `${APP_URL}/?ai=cancel`,
+      success_url: `${APP_URL}/sillance-app.html?ai=success`,
+      cancel_url: `${APP_URL}/sillance-app.html?ai=cancel`,
     });
 
     return json({ url: session.url });
