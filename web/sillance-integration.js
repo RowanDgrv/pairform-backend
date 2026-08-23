@@ -663,11 +663,12 @@ async function onLoggedIn() {
 }
 
 /* -------- confirmation de paiement (retour Stripe) --------
-   Chaque success_url/cancel_url d'edge function pointe vers sillance-app.html
-   avec un paramètre distinct (?checkout=, ?ai=, ?coaching=, ?club_sub=,
-   ?videos=, ?creneau=). Avant ce correctif (audit 23/08/2026), rien ne lisait
-   ces paramètres : un client qui venait de payer atterrissait sur l'app sans
-   la moindre confirmation. */
+   Chaque success_url/cancel_url/return_url/refresh_url d'edge function
+   pointe vers sillance-app.html avec un paramètre distinct (?checkout=,
+   ?ai=, ?coaching=, ?club_sub=, ?videos=, ?creneau=, ?coach_connect=,
+   ?club_connect=, ?portal=). Avant ce correctif (audit 23/08/2026), rien ne
+   lisait ces paramètres : un client qui venait de payer, ou de relier son
+   compte Stripe, atterrissait sur l'app sans la moindre confirmation. */
 const PAYMENT_RETURN_PARAMS = {
   checkout: { successValue: "success", cancelValue: "cancel", successKey: "payReturn.checkout.success", cancelKey: "payReturn.checkout.cancel" },
   ai: { successValue: "success", cancelValue: "cancel", successKey: "payReturn.ai.success", cancelKey: "payReturn.ai.cancel" },
@@ -675,19 +676,31 @@ const PAYMENT_RETURN_PARAMS = {
   club_sub: { successValue: "success", cancelValue: "cancel", successKey: "payReturn.clubSub.success", cancelKey: "payReturn.clubSub.cancel" },
   videos: { successValue: "success", cancelValue: "cancel", successKey: "payReturn.videos.success", cancelKey: "payReturn.videos.cancel" },
   creneau: { successValue: "paid", cancelValue: "cancel", successKey: "payReturn.creneau.success", cancelKey: "payReturn.creneau.cancel" },
+  coach_connect: { successValue: "done", cancelValue: "refresh", successKey: "payReturn.coachConnect.success", cancelKey: "payReturn.coachConnect.cancel" },
+  club_connect: { successValue: "done", cancelValue: "refresh", successKey: "payReturn.clubConnect.success", cancelKey: "payReturn.clubConnect.cancel" },
 };
+// Retours sans message dédié (rien de décisif ne s'est produit) : on nettoie
+// juste l'URL pour ne pas laisser un ?portal=return disgracieux dans la barre.
+const SILENT_RETURN_PARAMS = ["portal"];
 
 function checkPaymentReturn() {
   const params = new URLSearchParams(location.search);
+  let changed = false;
   for (const [key, cfg] of Object.entries(PAYMENT_RETURN_PARAMS)) {
     const val = params.get(key);
     if (val !== cfg.successValue && val !== cfg.cancelValue) continue;
     const success = val === cfg.successValue;
     showPaymentReturnModal(success, tr(success ? cfg.successKey : cfg.cancelKey));
     params.delete(key);
+    changed = true;
+    break; // un seul paramètre de retour à la fois en pratique
+  }
+  for (const key of SILENT_RETURN_PARAMS) {
+    if (params.has(key)) { params.delete(key); changed = true; }
+  }
+  if (changed) {
     const qs = params.toString();
     history.replaceState(null, "", location.pathname + (qs ? "?" + qs : "") + location.hash);
-    break; // un seul paramètre de retour à la fois en pratique
   }
 }
 
