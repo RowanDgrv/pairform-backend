@@ -4,6 +4,12 @@
 //  Crée une session Stripe Checkout en mode 'payment' (pas abonnement).
 //  Body : { creneau_id: string, member_id: string }
 //  Le webhook confirmera le paiement et marquera l'inscription 'paid'.
+//
+//  Auth : JWT. Autorisé si l'appelant est le gérant du club du créneau OU le
+//  membre concerné (même garde que club-subscribe/coach-subscribe — audit
+//  sécurité 24/08/2026 : cette vérification était absente, n'importe quel
+//  utilisateur authentifié pouvait créer un paiement/une ligne
+//  creneau_payments pour un member_id d'un club auquel il n'appartient pas).
 // =============================================================================
 import Stripe from "https://esm.sh/stripe@16.12.0?target=deno";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
@@ -31,11 +37,23 @@ Deno.serve(async (req) => {
     if (!user) return json({ error: "Non authentifié" }, 401);
 
     const { data: creneau } = await supabase
-      .from("creneaux").select("id, title, price").eq("id", creneau_id).single();
+      .from("creneaux").select("id, club_id, title, price").eq("id", creneau_id).single();
     if (!creneau) return json({ error: "Créneau introuvable" }, 404);
     if (!creneau.price || creneau.price <= 0) {
       return json({ error: "Ce créneau est gratuit (inclus dans l'adhésion)" }, 400);
     }
+
+    const { data: club } = await supabase
+      .from("clubs").select("owner_id").eq("id", creneau.club_id).single();
+    if (!club) return json({ error: "Club introuvable" }, 404);
+
+    const { data: member } = await supabase
+      .from("club_members").select("id, athlete_id").eq("id", member_id).eq("club_id", creneau.club_id).single();
+    if (!member) return json({ error: "Membre introuvable" }, 404);
+
+    const isOwner = club.owner_id === user.id;
+    const isSelf = member.athlete_id === user.id;
+    if (!isOwner && !isSelf) return json({ error: "Non autorisé" }, 403);
 
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
