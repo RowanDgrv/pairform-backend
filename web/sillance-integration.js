@@ -659,6 +659,59 @@ async function onLoggedIn() {
   const tok = PF.pendingInviteToken?.();
   if (tok) { try { await PF.acceptInvite(tok); } catch (e) { console.warn("[PF] invite:", e); } }
   await hydrate();
+  checkPaymentReturn();
+}
+
+/* -------- confirmation de paiement (retour Stripe) --------
+   Chaque success_url/cancel_url d'edge function pointe vers sillance-app.html
+   avec un paramètre distinct (?checkout=, ?ai=, ?coaching=, ?club_sub=,
+   ?videos=, ?creneau=). Avant ce correctif (audit 23/08/2026), rien ne lisait
+   ces paramètres : un client qui venait de payer atterrissait sur l'app sans
+   la moindre confirmation. */
+const PAYMENT_RETURN_PARAMS = {
+  checkout: { successValue: "success", cancelValue: "cancel", successKey: "payReturn.checkout.success", cancelKey: "payReturn.checkout.cancel" },
+  ai: { successValue: "success", cancelValue: "cancel", successKey: "payReturn.ai.success", cancelKey: "payReturn.ai.cancel" },
+  coaching: { successValue: "success", cancelValue: "cancel", successKey: "payReturn.coaching.success", cancelKey: "payReturn.coaching.cancel" },
+  club_sub: { successValue: "success", cancelValue: "cancel", successKey: "payReturn.clubSub.success", cancelKey: "payReturn.clubSub.cancel" },
+  videos: { successValue: "success", cancelValue: "cancel", successKey: "payReturn.videos.success", cancelKey: "payReturn.videos.cancel" },
+  creneau: { successValue: "paid", cancelValue: "cancel", successKey: "payReturn.creneau.success", cancelKey: "payReturn.creneau.cancel" },
+};
+
+function checkPaymentReturn() {
+  const params = new URLSearchParams(location.search);
+  for (const [key, cfg] of Object.entries(PAYMENT_RETURN_PARAMS)) {
+    const val = params.get(key);
+    if (val !== cfg.successValue && val !== cfg.cancelValue) continue;
+    const success = val === cfg.successValue;
+    showPaymentReturnModal(success, tr(success ? cfg.successKey : cfg.cancelKey));
+    params.delete(key);
+    const qs = params.toString();
+    history.replaceState(null, "", location.pathname + (qs ? "?" + qs : "") + location.hash);
+    break; // un seul paramètre de retour à la fois en pratique
+  }
+}
+
+function showPaymentReturnModal(success, message) {
+  let ov = document.getElementById("pf-payreturn-overlay");
+  if (!ov) {
+    ov = document.createElement("div");
+    ov.id = "pf-payreturn-overlay";
+    ov.className = "overlay";
+    ov.style.zIndex = "100000"; // au-dessus du tuto interactif (z-index jusqu'à 99999)
+    document.body.appendChild(ov);
+  }
+  const close = () => ov.classList.remove("open");
+  ov.innerHTML = `<div class="modal" style="max-width:420px;text-align:center">
+      <button class="close" id="pf-payreturn-close" aria-label="${tr("common.close")}">&times;</button>
+      ${success ? '<div style="font-size:38px;color:var(--good);margin-bottom:8px">&#10003;</div>' : ""}
+      <h3>${tr(success ? "payReturn.titleSuccess" : "payReturn.titleCancel")}</h3>
+      <p style="color:var(--soft);margin:10px 0 20px">${esc(message)}</p>
+      <button class="btn" id="pf-payreturn-ok">${tr("payReturn.continue")}</button>
+    </div>`;
+  ov.classList.add("open");
+  ov.querySelector("#pf-payreturn-close").onclick = close;
+  ov.querySelector("#pf-payreturn-ok").onclick = close;
+  ov.onclick = (e) => { if (e.target === ov) close(); };
 }
 
 /* ===========================================================================
