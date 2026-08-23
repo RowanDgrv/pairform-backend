@@ -80,17 +80,17 @@ export const PF = {
     return this.user;
   },
 
-  async signUp({ email, password, fullName, role = "athlete" }) {
+  async signUp({ email, password, fullName, role = "athlete", captchaToken }) {
     const { data, error } = await sb.auth.signUp({
       email, password,
-      options: { data: { full_name: fullName, role } },
+      options: { data: { full_name: fullName, role }, captchaToken },
     });
     if (error) throw error;
     return data;
   },
 
-  async signIn({ email, password }) {
-    const { data, error } = await sb.auth.signInWithPassword({ email, password });
+  async signIn({ email, password, captchaToken }) {
+    const { data, error } = await sb.auth.signInWithPassword({ email, password, options: { captchaToken } });
     if (error) throw error;
     this.user = data.user;
     await this.loadProfile();

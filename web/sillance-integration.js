@@ -21,6 +21,35 @@ function tr(key, vars) { return window.SilI18n ? window.SilI18n.t(key, vars) : k
 const A = () => window.__pf_app;   // raccourci vers le hook de l'app
 const TRIAL_DAYS = 14;             // durée de l'essai gratuit coach (jours)
 
+// -------- anti-bot (audit sécurité 23-24/08/2026, point "protection anti-robots") --------
+// Cloudflare Turnstile sur le formulaire de connexion/inscription : gratuit,
+// généralement invisible pour un vrai visiteur (pas de puzzle à résoudre).
+// TURNSTILE_SITE_KEY = À REMPLACER par la clé de site créée sur le dashboard
+// Cloudflare (dash.cloudflare.com → Turnstile → Add site, domaine sillance.app).
+// Tant que ce placeholder n'est pas remplacé ET que le "Enable CAPTCHA
+// protection" n'est pas activé côté Supabase Auth (Authentication → Settings
+// → Bot and Abuse Protection, avec la clé secrète correspondante), ce widget
+// ne bloque RIEN : Supabase ignore un captchaToken absent/vide tant que la
+// protection n'est pas activée côté serveur. Les deux réglages doivent être
+// faits ensemble pour que la protection soit réellement active.
+const TURNSTILE_SITE_KEY = "0x0000000000000000000000AA"; // placeholder — à remplacer
+let turnstileToken = "";
+let turnstileWidgetId = null;
+function renderTurnstile() {
+  const el = document.getElementById("pf-turnstile");
+  if (!el || typeof window.turnstile === "undefined") return;
+  if (turnstileWidgetId != null) { try { window.turnstile.remove(turnstileWidgetId); } catch (e) {} }
+  turnstileToken = "";
+  try {
+    turnstileWidgetId = window.turnstile.render(el, {
+      sitekey: TURNSTILE_SITE_KEY,
+      callback: (token) => { turnstileToken = token; },
+      "error-callback": () => { turnstileToken = ""; },
+      "expired-callback": () => { turnstileToken = ""; },
+    });
+  } catch (e) { console.warn("[PF] turnstile:", e); }
+}
+
 // Comptes modérateurs Sillance : jamais de paywall/essai limité, quel que
 // soit le rôle. Volontairement une liste en dur (front only, pas de colonne
 // admin en base) — usage interne, à étendre ici si besoin d'un 2e compte.
@@ -467,6 +496,7 @@ function renderAuth() {
     <label>${tr("auth.password")}</label><input id="pf-pass" type="password" placeholder="••••••••">
     <div class="err" id="pf-err"></div>
     ${isUp ? `<label class="pf-consent"><input type="checkbox" id="pf-consent"><span>${tr("auth.consentText")} <a href="./legal.html#confidentialite" target="_blank" rel="noopener">${tr("auth.privacyPolicyLink")}</a>.</span></label>` : ``}
+    <div id="pf-turnstile" style="margin:6px 0"></div>
     <button class="primary" id="pf-go">${isUp ? tr("auth.createMyAccount") : tr("auth.logIn")}</button>
     <div class="switch">${isUp
       ? `${tr("auth.alreadyAccount")} <a id="pf-switch">${tr("auth.logIn")}</a>`
@@ -478,6 +508,7 @@ function renderAuth() {
   });
   card.querySelector("#pf-switch").onclick = () => { authMode = isUp ? "signin" : "signup"; renderAuth(); };
   card.querySelector("#pf-go").onclick = submitAuth;
+  renderTurnstile();
 }
 
 async function submitAuth() {
@@ -490,17 +521,18 @@ async function submitAuth() {
       const consent = document.getElementById("pf-consent");
       if (consent && !consent.checked) { err.textContent = tr("auth.pleaseAcceptConsent"); return; }
       const fullName = document.getElementById("pf-name").value.trim();
-      await PF.signUp({ email, password, fullName, role: pickedRole });
+      await PF.signUp({ email, password, fullName, role: pickedRole, captchaToken: turnstileToken });
       // Selon la config Supabase, une confirmation email peut être requise.
-      await PF.signIn({ email, password }).catch(() => {});
+      await PF.signIn({ email, password, captchaToken: turnstileToken }).catch(() => {});
       if (!PF.user) { err.textContent = tr("auth.accountCreatedCheckEmail"); authMode = "signin"; renderAuth(); return; }
     } else {
-      await PF.signIn({ email, password });
+      await PF.signIn({ email, password, captchaToken: turnstileToken });
     }
     closeAuth(true);
     await onLoggedIn();
   } catch (e) {
     err.textContent = e?.message || tr("auth.connectionError");
+    renderTurnstile(); // jeton à usage unique : en repréparer un pour la prochaine tentative
   }
 }
 
