@@ -8,6 +8,7 @@
 import {
   admin, appUrl, stravaExchangeCode, stravaImportRecent,
 } from "../_shared/providers.ts";
+import { encryptToken, decryptConn } from "../_shared/tokenCrypto.ts";
 
 Deno.serve(async (req) => {
   const url = new URL(req.url);
@@ -15,7 +16,7 @@ Deno.serve(async (req) => {
   const state = url.searchParams.get("state");
   const oauthErr = url.searchParams.get("error");
 
-  const back = (params: string) => Response.redirect(`${appUrl()}/?${params}`, 302);
+  const back = (params: string) => Response.redirect(`${appUrl()}/sillance-app.html?${params}`, 302);
 
   if (oauthErr) return back(`strava=error&reason=${encodeURIComponent(oauthErr)}`);
   if (!code || !state) return back("strava=error&reason=missing_params");
@@ -32,16 +33,17 @@ Deno.serve(async (req) => {
     // Échange le code contre des jetons (+ infos athlète).
     const t = await stravaExchangeCode(code);
 
-    const { data: conn, error } = await sb.from("device_connections").upsert({
+    const { data: connRow, error } = await sb.from("device_connections").upsert({
       user_id: st.user_id,
       provider: "strava",
       provider_user_id: t.athlete?.id ? String(t.athlete.id) : null,
-      access_token: t.access_token,
-      refresh_token: t.refresh_token,
+      access_token: await encryptToken(t.access_token),
+      refresh_token: await encryptToken(t.refresh_token),
       expires_at: new Date(t.expires_at * 1000).toISOString(),
       scope: t.scope ?? null,
     }, { onConflict: "user_id,provider" }).select().single();
     if (error) throw error;
+    const conn = await decryptConn(connRow);
 
     // Import initial (best-effort — ne bloque pas le retour si ça échoue).
     let imported = 0;

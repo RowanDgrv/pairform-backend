@@ -7,6 +7,7 @@
 //  est toujours conservé dans external_activities.raw.
 // =============================================================================
 import { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { encryptToken } from "./tokenCrypto.ts";
 
 export const COROS = {
   authorizeUrl: "https://open.coros.com/oauth2/authorize",
@@ -90,8 +91,8 @@ export async function corosValidToken(sb: SupabaseClient, conn: any): Promise<st
   const t = await res.json();
   const expiresAt = t.expires_in ? new Date((now + Number(t.expires_in)) * 1000).toISOString() : null;
   await sb.from("device_connections").update({
-    access_token: t.access_token,
-    refresh_token: t.refresh_token ?? conn.refresh_token,
+    access_token: await encryptToken(t.access_token),
+    refresh_token: await encryptToken(t.refresh_token ?? conn.refresh_token),
     expires_at: expiresAt,
   }).eq("id", conn.id);
   return t.access_token;

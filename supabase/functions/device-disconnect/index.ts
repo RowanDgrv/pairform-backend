@@ -4,6 +4,7 @@
 //  Supprime la connexion et révoque le jeton côté plateforme si possible.
 // =============================================================================
 import { admin, corsHeaders, json, userFromReq, stravaValidToken } from "../_shared/providers.ts";
+import { decryptConn } from "../_shared/tokenCrypto.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -15,8 +16,9 @@ Deno.serve(async (req) => {
     const { provider } = await req.json();
     if (!provider) return json({ error: "provider requis" }, 400);
 
-    const { data: conn } = await sb.from("device_connections")
+    const { data: connRow } = await sb.from("device_connections")
       .select("*").eq("user_id", user.id).eq("provider", provider).maybeSingle();
+    const conn = await decryptConn(connRow);
 
     // Révocation côté plateforme (best-effort).
     if (conn && provider === "strava") {

@@ -5,6 +5,7 @@
 // =============================================================================
 import { admin } from "../_shared/providers.ts";
 import { garminImportRecent } from "../_shared/garmin.ts";
+import { decryptConn } from "../_shared/tokenCrypto.ts";
 
 // Global injecté par le runtime Supabase Edge Functions (Deno Deploy), absent
 // des types Deno standards — `deno check` en CI (sans ce runtime) ne le
@@ -40,9 +41,10 @@ async function ingest(payload: any) {
   }
 
   for (const garminUid of garminUids) {
-    const { data: conn } = await sb.from("device_connections")
+    const { data: connRow } = await sb.from("device_connections")
       .select("*").eq("provider", "garmin").eq("provider_user_id", garminUid).maybeSingle();
-    if (!conn) continue;
+    if (!connRow) continue;
+    const conn = await decryptConn(connRow);
     try { await garminImportRecent(sb, conn); } catch (e) { console.error("garmin re-fetch:", e); }
   }
 }

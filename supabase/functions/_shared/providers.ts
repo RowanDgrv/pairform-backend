@@ -11,6 +11,7 @@
 //   • Coros   → OAuth2 renseigné, nécessite le "COROS Open API" partner program.
 // =============================================================================
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { encryptToken } from "./tokenCrypto.ts";
 
 export type Provider = "strava" | "garmin" | "coros" | "polar" | "suunto" | "wahoo";
 
@@ -171,8 +172,8 @@ export async function stravaValidToken(sb: SupabaseClient, conn: any): Promise<s
   if (!res.ok) throw new Error(`Strava refresh: ${res.status} ${await res.text()}`);
   const t = await res.json();
   await sb.from("device_connections").update({
-    access_token: t.access_token,
-    refresh_token: t.refresh_token,
+    access_token: await encryptToken(t.access_token),
+    refresh_token: await encryptToken(t.refresh_token),
     expires_at: new Date(t.expires_at * 1000).toISOString(),
   }).eq("id", conn.id);
   return t.access_token;

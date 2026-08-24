@@ -6,6 +6,7 @@
 // =============================================================================
 import { admin } from "../_shared/providers.ts";
 import { corosImportRecent } from "../_shared/coros.ts";
+import { decryptConn } from "../_shared/tokenCrypto.ts";
 
 // Global injecté par le runtime Supabase Edge Functions (Deno Deploy), absent
 // des types Deno standards — `deno check` en CI (sans ce runtime) ne le
@@ -43,9 +44,10 @@ async function ingest(payload: any) {
     const openId = String(g?.openId ?? g?.userId ?? payload?.openId ?? "");
     if (!openId || seen.has(openId)) continue;
     seen.add(openId);
-    const { data: conn } = await sb.from("device_connections")
+    const { data: connRow } = await sb.from("device_connections")
       .select("*").eq("provider", "coros").eq("provider_user_id", openId).maybeSingle();
-    if (!conn) continue;
+    if (!connRow) continue;
+    const conn = await decryptConn(connRow);
     try { await corosImportRecent(sb, conn); } catch (e) { console.error("coros re-fetch:", e); }
   }
 }

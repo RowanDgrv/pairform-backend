@@ -6,6 +6,7 @@
 import { admin, corsHeaders, json, userFromReq, stravaImportRecent } from "../_shared/providers.ts";
 import { corosImportRecent } from "../_shared/coros.ts";
 import { garminImportRecent } from "../_shared/garmin.ts";
+import { decryptConn } from "../_shared/tokenCrypto.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -16,9 +17,10 @@ Deno.serve(async (req) => {
 
     const { provider = "strava" } = await req.json().catch(() => ({}));
 
-    const { data: conn } = await sb.from("device_connections")
+    const { data: connRow } = await sb.from("device_connections")
       .select("*").eq("user_id", user.id).eq("provider", provider).maybeSingle();
-    if (!conn) return json({ error: `Aucune connexion ${provider}` }, 404);
+    if (!connRow) return json({ error: `Aucune connexion ${provider}` }, 404);
+    const conn = await decryptConn(connRow);
 
     let imported = 0;
     if (provider === "strava") imported = await stravaImportRecent(sb, conn);

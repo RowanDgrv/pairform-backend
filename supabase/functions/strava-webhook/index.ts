@@ -7,6 +7,7 @@
 //  Secret attendu : STRAVA_VERIFY_TOKEN (choisi par toi à la souscription).
 // =============================================================================
 import { admin, stravaValidToken, normalizeStravaActivity } from "../_shared/providers.ts";
+import { decryptConn } from "../_shared/tokenCrypto.ts";
 
 // Global injecté par le runtime Supabase Edge Functions (Deno Deploy), absent
 // des types Deno standards — `deno check` en CI (sans ce runtime) ne le
@@ -52,9 +53,10 @@ Deno.serve(async (req) => {
 async function processActivity(evt: any) {
   const sb = admin();
   // Retrouve la connexion par owner_id (= provider_user_id Strava).
-  const { data: conn } = await sb.from("device_connections")
+  const { data: connRow } = await sb.from("device_connections")
     .select("*").eq("provider", "strava").eq("provider_user_id", String(evt.owner_id)).maybeSingle();
-  if (!conn) return;
+  if (!connRow) return;
+  const conn = await decryptConn(connRow);
 
   const token = await stravaValidToken(sb, conn);
   const res = await fetch(`https://www.strava.com/api/v3/activities/${evt.object_id}`, {

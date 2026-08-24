@@ -9,6 +9,7 @@ import {
   admin, corsHeaders, json, userFromReq,
   stravaValidToken, stravaFetchActivityDetail, stravaFetchStreams, normalizeStravaStreams,
 } from "../_shared/providers.ts";
+import { decryptConn } from "../_shared/tokenCrypto.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -27,9 +28,10 @@ Deno.serve(async (req) => {
 
     if (act.points) return json({ points: act.points });
 
-    const { data: conn } = await sb.from("device_connections")
+    const { data: connRow } = await sb.from("device_connections")
       .select("*").eq("user_id", user.id).eq("provider", "strava").maybeSingle();
-    if (!conn) return json({ error: "Compte Strava non connecté" }, 404);
+    if (!connRow) return json({ error: "Compte Strava non connecté" }, 404);
+    const conn = await decryptConn(connRow);
 
     const token = await stravaValidToken(sb, conn);
     const [detail, streams] = await Promise.all([

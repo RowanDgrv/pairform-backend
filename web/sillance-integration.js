@@ -708,6 +708,36 @@ async function onLoggedIn() {
   if (tok) { try { await PF.acceptInvite(tok); } catch (e) { console.warn("[PF] invite:", e); } }
   await hydrate();
   checkPaymentReturn();
+  checkDeviceReturn();
+}
+
+/* -------- confirmation de connexion appareil (retour Strava/Garmin/Coros) --------
+   Même trou que checkPaymentReturn (audit 23/08/2026, corrigé le 24/08 pour
+   les 3 fonctions d'oauth-callback) : le navigateur revient sur
+   sillance-app.html?strava=connected&imported=N (ou =error&reason=...), mais
+   rien ne lisait ce paramètre — l'utilisateur ne voyait jamais la
+   confirmation, et l'état de la carte Synchronisation ne se rafraîchissait
+   pas tant qu'il ne rechargeait pas la page à la main. */
+const DEVICE_RETURN_PROVIDERS = { strava: "Strava", garmin: "Garmin", coros: "Coros" };
+
+function checkDeviceReturn() {
+  const params = new URLSearchParams(location.search);
+  for (const [key, label] of Object.entries(DEVICE_RETURN_PROVIDERS)) {
+    const val = params.get(key);
+    if (val !== "connected" && val !== "error") continue;
+    if (val === "connected") {
+      const n = Number(params.get("imported") || 0);
+      const key2 = n === 0 ? "deviceReturn.connectedZero" : n === 1 ? "deviceReturn.connectedSingular" : "deviceReturn.connectedPlural";
+      window.toast?.(tr(key2, { provider: label, n }));
+      A()?.refreshDevices?.();
+    } else {
+      window.toast?.(tr("deviceReturn.error"), "error");
+    }
+    params.delete(key); params.delete("imported"); params.delete("reason");
+    const qs = params.toString();
+    history.replaceState(null, "", location.pathname + (qs ? "?" + qs : "") + location.hash);
+    break;
+  }
 }
 
 /* -------- confirmation de paiement (retour Stripe) --------

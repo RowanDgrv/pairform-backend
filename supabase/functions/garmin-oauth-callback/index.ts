@@ -5,12 +5,13 @@
 // =============================================================================
 import { admin, appUrl } from "../_shared/providers.ts";
 import { garminAccessToken, garminUserId, garminImportRecent } from "../_shared/garmin.ts";
+import { encryptToken, decryptConn } from "../_shared/tokenCrypto.ts";
 
 Deno.serve(async (req) => {
   const url = new URL(req.url);
   const oauthToken = url.searchParams.get("oauth_token");
   const verifier = url.searchParams.get("oauth_verifier");
-  const back = (p: string) => Response.redirect(`${appUrl()}/?${p}`, 302);
+  const back = (p: string) => Response.redirect(`${appUrl()}/sillance-app.html?${p}`, 302);
 
   if (!oauthToken || !verifier) return back("garmin=error&reason=missing_params");
 
@@ -26,14 +27,15 @@ Deno.serve(async (req) => {
     const acc = await garminAccessToken(oauthToken, reqSecret, verifier);
     const userId = await garminUserId(acc.token, acc.secret);
 
-    const { data: conn, error } = await sb.from("device_connections").upsert({
+    const { data: connRow, error } = await sb.from("device_connections").upsert({
       user_id: st.user_id,
       provider: "garmin",
       provider_user_id: userId,
-      access_token: acc.token,
-      token_secret: acc.secret,
+      access_token: await encryptToken(acc.token),
+      token_secret: await encryptToken(acc.secret),
     }, { onConflict: "user_id,provider" }).select().single();
     if (error) throw error;
+    const conn = await decryptConn(connRow);
 
     let imported = 0;
     try { imported = await garminImportRecent(sb, conn); } catch (e) { console.error("import:", e); }
