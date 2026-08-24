@@ -14,8 +14,10 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
-    const { email } = await req.json();
-    if (!email) return json({ error: "Email requis" }, 400);
+    const { email: rawEmail } = await req.json();
+    if (!rawEmail) return json({ error: "Email requis" }, 400);
+    const email = String(rawEmail).toLowerCase().trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return json({ error: "Email invalide" }, 400);
 
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
