@@ -511,6 +511,22 @@ function renderAuth() {
   renderTurnstile();
 }
 
+// Supabase Auth ne traduit pas ses messages d'erreur (toujours en anglais
+// technique, ex. "Invalid login credentials"). Audit produit 23/08/2026,
+// point "erreurs de formulaire" : reformule les cas courants dans la langue
+// de l'utilisateur ; un message non reconnu (rare, ex. panne réseau
+// ponctuelle) reste affiché tel quel plutôt que d'être masqué.
+function mapAuthError(e) {
+  const msg = String(e?.message || "");
+  if (/invalid login credentials/i.test(msg)) return tr("auth.errInvalidCredentials");
+  if (/user already registered/i.test(msg)) return tr("auth.errUserExists");
+  if (/password.*(least|at least|characters)/i.test(msg)) return tr("auth.errWeakPassword");
+  if (/email not confirmed/i.test(msg)) return tr("auth.errEmailNotConfirmed");
+  if (/invalid.*email|unable to validate email/i.test(msg)) return tr("auth.errInvalidEmail");
+  if (/rate limit|only request this after/i.test(msg)) return tr("auth.errRateLimited");
+  return msg || tr("auth.connectionError");
+}
+
 async function submitAuth() {
   const err = document.getElementById("pf-err");
   err.textContent = "";
@@ -531,7 +547,7 @@ async function submitAuth() {
     closeAuth(true);
     await onLoggedIn();
   } catch (e) {
-    err.textContent = e?.message || tr("auth.connectionError");
+    err.textContent = mapAuthError(e);
     renderTurnstile(); // jeton à usage unique : en repréparer un pour la prochaine tentative
   }
 }
