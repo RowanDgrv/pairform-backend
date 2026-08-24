@@ -24,15 +24,10 @@ const TRIAL_DAYS = 14;             // durée de l'essai gratuit coach (jours)
 // -------- anti-bot (audit sécurité 23-24/08/2026, point "protection anti-robots") --------
 // Cloudflare Turnstile sur le formulaire de connexion/inscription : gratuit,
 // généralement invisible pour un vrai visiteur (pas de puzzle à résoudre).
-// TURNSTILE_SITE_KEY = À REMPLACER par la clé de site créée sur le dashboard
-// Cloudflare (dash.cloudflare.com → Turnstile → Add site, domaine sillance.app).
-// Tant que ce placeholder n'est pas remplacé ET que le "Enable CAPTCHA
-// protection" n'est pas activé côté Supabase Auth (Authentication → Settings
-// → Bot and Abuse Protection, avec la clé secrète correspondante), ce widget
-// ne bloque RIEN : Supabase ignore un captchaToken absent/vide tant que la
-// protection n'est pas activée côté serveur. Les deux réglages doivent être
-// faits ensemble pour que la protection soit réellement active.
-const TURNSTILE_SITE_KEY = "0x0000000000000000000000AA"; // placeholder — à remplacer
+// Widget Turnstile "Sillance" créé le 24/08/2026 sur dash.cloudflare.com,
+// domaine sillance.app, mode Managed. La clé secrète correspondante est
+// configurée côté Supabase Auth (Bot and Abuse Protection).
+const TURNSTILE_SITE_KEY = "0x4AAAAAAEaRDnprER4n9rck";
 let turnstileToken = "";
 let turnstileWidgetId = null;
 function renderTurnstile() {
