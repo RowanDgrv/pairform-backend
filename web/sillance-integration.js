@@ -318,10 +318,6 @@ async function hydrate() {
       }
       window.__pf_trial_days = trialDaysLeft;
       renderCoachGate({ subscribed: ok, role, trialDaysLeft, locked });
-      // Vidéos : réservées aux athlètes que leur coach a activés (et payés).
-      const videosOk = admin || (role === "athlete" ? await PF.athleteHasVideos() : true);
-      window.__pf_videos_ok = videosOk;
-      renderVideoGate({ role, videosOk });
     }),
 
     section("aiAddon", async () => {
@@ -598,12 +594,7 @@ function injectGateStyles() {
     display:flex;flex-direction:column;gap:7px}
   #pf-lock-overlay .tier-included li{font:400 12.5px/1.4 'Archivo',system-ui;color:#aebcc4;
     display:flex;gap:8px;align-items:baseline}
-  #pf-lock-overlay .tier-included li::before{content:"✓";color:#46C2D8;font-weight:700;flex:none}
-  #videolib.pf-vlocked > :not(h2):not(#pf-video-teaser){display:none!important}
-  #pf-video-teaser{border:1px dashed #2a3b44;border-radius:12px;padding:26px 20px;margin-top:14px;
-    text-align:center;background:rgba(70,194,216,.04)}
-  #pf-video-teaser .t{font:800 16px 'Oswald',system-ui;color:#eaf6f9;margin-bottom:6px}
-  #pf-video-teaser .s{font:400 13.5px/1.5 'Archivo',system-ui;color:#9fb0bb}`;
+  #pf-lock-overlay .tier-included li::before{content:"✓";color:#46C2D8;font-weight:700;flex:none}`;
   const s = document.createElement("style");
   s.id = "pf-gate-style"; s.textContent = css;
   document.head.appendChild(s);
@@ -681,26 +672,6 @@ function renderCoachGate({ subscribed, role, trialDaysLeft, locked }) {
 
 // Vidéos côté ATHLÈTE : masque la bibliothèque tant que le coach ne l'a pas
 // activée pour lui, et affiche un message d'invitation. Coach/club/démo intacts.
-function renderVideoGate({ role, videosOk }) {
-  injectGateStyles();
-  const lib = document.getElementById("videolib");
-  if (!lib) return;
-  const locked = role === "athlete" && !videosOk;
-  lib.classList.toggle("pf-vlocked", locked);
-  let teaser = document.getElementById("pf-video-teaser");
-  if (locked) {
-    if (!teaser) {
-      teaser = document.createElement("div");
-      teaser.id = "pf-video-teaser";
-      teaser.innerHTML = `<div class="t">🔒 ${tr("gate.videosLockedTitle")}</div>
-        <div class="s">${tr("gate.videosLockedText1")}<br>${tr("gate.videosLockedText2")}</div>`;
-      lib.appendChild(teaser);
-    }
-  } else if (teaser) {
-    teaser.remove();
-  }
-}
-
 async function onLoggedIn() {
   setCloudBadge(true);
   // Accepte une éventuelle invitation présente dans l'URL (?invite=...).
