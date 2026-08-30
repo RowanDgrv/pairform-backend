@@ -54,6 +54,7 @@ Deno.serve(async (req) => {
     };
     if (provider === "strava") { params.approval_prompt = "auto"; params.scope = cfg.scope; }
     if (provider === "coros" && cfg.scope) params.scope = cfg.scope;
+    if (provider === "intervals" && cfg.scope) params.scope = cfg.scope;
     return json({ url: `${cfg.authorizeUrl}?` + new URLSearchParams(params).toString() });
   } catch (e) {
     console.error(e);

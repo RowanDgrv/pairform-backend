@@ -4,6 +4,7 @@
 //  Supprime la connexion et révoque le jeton côté plateforme si possible.
 // =============================================================================
 import { admin, corsHeaders, json, userFromReq, stravaValidToken } from "../_shared/providers.ts";
+import { intervalsDisconnect } from "../_shared/intervals.ts";
 import { decryptConn } from "../_shared/tokenCrypto.ts";
 
 Deno.serve(async (req) => {
@@ -28,6 +29,10 @@ Deno.serve(async (req) => {
           method: "POST", headers: { Authorization: `Bearer ${token}` },
         });
       } catch (e) { console.error("deauthorize:", e); }
+    }
+    if (conn && provider === "intervals") {
+      // conn.access_token est déjà déchiffré par decryptConn.
+      await intervalsDisconnect(conn.access_token);
     }
 
     await sb.from("device_connections").delete().eq("user_id", user.id).eq("provider", provider);

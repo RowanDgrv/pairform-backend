@@ -13,7 +13,8 @@
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { encryptToken } from "./tokenCrypto.ts";
 
-export type Provider = "strava" | "garmin" | "coros" | "polar" | "suunto" | "wahoo";
+export type Provider =
+  | "strava" | "garmin" | "coros" | "polar" | "suunto" | "wahoo" | "intervals";
 
 // Origine autorisée pilotée par env (durci — voir _shared/cors.ts). Une seule
 // origine explicite, jamais '*'. Défaut = front GitHub Pages ; en prod, poser
@@ -90,6 +91,18 @@ export const OAUTH: Record<string, OAuthConfig> = {
     scope: "",
     clientId: () => Deno.env.get("COROS_CLIENT_ID"),
     clientSecret: () => Deno.env.get("COROS_CLIENT_SECRET"),
+  },
+  // intervals.icu : OAuth2 SANS refresh token (le Bearer ne périme pas). Agrège
+  // Garmin/Coros/Polar/Suunto/Wahoo/Zwift/.FIT (hors Strava). S'active dès
+  // qu'INTERVALS_CLIENT_ID est présent — app à faire approuver sur
+  // https://intervals.icu/oauth/apply. Échange du code + import : _shared/intervals.ts.
+  intervals: {
+    ready: true,
+    authorizeUrl: "https://intervals.icu/oauth/authorize",
+    tokenUrl: "https://intervals.icu/api/oauth/token",
+    scope: "ACTIVITY:READ",
+    clientId: () => Deno.env.get("INTERVALS_CLIENT_ID"),
+    clientSecret: () => Deno.env.get("INTERVALS_CLIENT_SECRET"),
   },
 };
 

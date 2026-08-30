@@ -91,7 +91,15 @@ supabase functions deploy coros-oauth-callback   --no-verify-jwt
 supabase functions deploy coros-webhook          --no-verify-jwt
 supabase functions deploy garmin-oauth-callback  --no-verify-jwt
 supabase functions deploy garmin-webhook         --no-verify-jwt
+supabase functions deploy intervals-oauth-callback --no-verify-jwt
 ```
+
+> **intervals.icu** : nécessite les secrets `INTERVALS_CLIENT_ID` /
+> `INTERVALS_CLIENT_SECRET` (app à faire approuver sur
+> https://intervals.icu/oauth/apply). Redirect URI à déclarer :
+> `https://VOTRE-PROJET.supabase.co/functions/v1/intervals-oauth-callback`.
+> Pas de webhook côté intervals.icu → import initial à la connexion + bouton
+> « Synchroniser ». Guide complet : `~/sillance-docs-prives/INTERVALS-ICU-SETUP.md`.
 
 ## 8. Souscrire au webhook Strava (push automatique des activités)
 ```bash

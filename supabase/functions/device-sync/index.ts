@@ -6,6 +6,7 @@
 import { admin, corsHeaders, json, userFromReq, stravaImportRecent } from "../_shared/providers.ts";
 import { corosImportRecent } from "../_shared/coros.ts";
 import { garminImportRecent } from "../_shared/garmin.ts";
+import { intervalsImportRecent } from "../_shared/intervals.ts";
 import { decryptConn } from "../_shared/tokenCrypto.ts";
 
 Deno.serve(async (req) => {
@@ -26,6 +27,7 @@ Deno.serve(async (req) => {
     if (provider === "strava") imported = await stravaImportRecent(sb, conn);
     else if (provider === "coros") imported = await corosImportRecent(sb, conn);
     else if (provider === "garmin") imported = await garminImportRecent(sb, conn);
+    else if (provider === "intervals") imported = await intervalsImportRecent(sb, conn);
     else return json({ error: `Sync non implémentée pour ${provider}` }, 400);
     return json({ imported });
   } catch (e) {

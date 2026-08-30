@@ -1,0 +1,13 @@
+-- =============================================================================
+--  Ajout du provider "intervals" (intervals.icu) à l'énum device_provider.
+--  ---------------------------------------------------------------------------
+--  intervals.icu agrège déjà Garmin / Coros / Polar / Suunto / Wahoo / Zwift
+--  et l'import .FIT : un seul branchement OAuth2 côté Sillance donne accès aux
+--  activités de l'athlète quelle que soit sa montre.
+--  Limite connue : les activités d'ORIGINE Strava ne sont pas exposées par
+--  l'API intervals.icu (règle des CGU Strava) — ces athlètes passent par la
+--  connexion Strava directe déjà en place.
+--  OAuth2 sans refresh token : le Bearer ne périme pas ; une nouvelle
+--  autorisation le remplace (cf. _shared/intervals.ts).
+-- =============================================================================
+alter type device_provider add value if not exists 'intervals';
