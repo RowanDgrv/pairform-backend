@@ -1,9 +1,12 @@
 // =============================================================================
-//  Edge Function : coros-oauth-callback  (déployer avec --no-verify-jwt)
-//  Retour OAuth2 Coros → échange le code, enregistre la connexion, import initial.
+//  Edge Function : coros-oauth-callback   (déployer avec --no-verify-jwt)
+//  Retour OAuth 2.1 du serveur MCP COROS → échange le code (PKCE), enregistre
+//  la connexion, lance un import initial.
+//  Le code_verifier PKCE est repris depuis oauth_states.meta (posé par
+//  buildAuthUrl dans _shared/corosMcp.ts).
 // =============================================================================
 import { admin, appUrl, functionsBase } from "../_shared/providers.ts";
-import { corosExchangeCode, corosImportRecent } from "../_shared/coros.ts";
+import { corosClientId, exchangeCode, importRecent, fetchWellness } from "../_shared/corosMcp.ts";
 import { encryptToken, decryptConn } from "../_shared/tokenCrypto.ts";
 
 Deno.serve(async (req) => {
@@ -23,24 +26,30 @@ Deno.serve(async (req) => {
     if (!st) return back("coros=error&reason=bad_state");
     await sb.from("oauth_states").delete().eq("state", state);
 
-    const redirectUri = `${functionsBase()}/coros-oauth-callback`;
-    const t = await corosExchangeCode(code, redirectUri);
+    const verifier = st.meta?.code_verifier;
+    const redirectUri = st.meta?.redirect_uri ?? `${functionsBase()}/coros-oauth-callback`;
+    if (!verifier) return back("coros=error&reason=missing_verifier");
+
+    const clientId = await corosClientId(sb, redirectUri);
+    const t = await exchangeCode(clientId, code, verifier, redirectUri);
 
     const now = Math.floor(Date.now() / 1000);
     const { data: connRow, error } = await sb.from("device_connections").upsert({
       user_id: st.user_id,
       provider: "coros",
-      provider_user_id: t.openId ?? t.userId ?? t.data?.openId ?? null,
       access_token: await encryptToken(t.access_token),
       refresh_token: await encryptToken(t.refresh_token ?? null),
       expires_at: t.expires_in ? new Date((now + Number(t.expires_in)) * 1000).toISOString() : null,
       scope: t.scope ?? null,
+      meta: { redirect_uri: redirectUri, connected_via: "mcp" },
     }, { onConflict: "user_id,provider" }).select().single();
     if (error) throw error;
     const conn = await decryptConn(connRow);
 
     let imported = 0;
-    try { imported = await corosImportRecent(sb, conn); } catch (e) { console.error("import:", e); }
+    try { imported = await importRecent(sb, conn); } catch (e) { console.error("coros import:", e); }
+    try { await fetchWellness(sb, conn); } catch (e) { console.error("coros wellness:", e); }
+
     return back(`coros=connected&imported=${imported}`);
   } catch (e) {
     console.error(e);

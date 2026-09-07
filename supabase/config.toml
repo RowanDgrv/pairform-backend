@@ -63,3 +63,14 @@ verify_jwt = true
 
 [functions.video-url]
 verify_jwt = true
+
+# COROS : callback OAuth (redirection navigateur, pas de JWT Supabase) +
+# tirage programmé (protégé par x-cron-secret, comme morning-digest).
+[functions.coros-oauth-callback]
+verify_jwt = false
+
+[functions.coros-poll]
+verify_jwt = false
+
+[functions.coros-webhook]
+verify_jwt = false

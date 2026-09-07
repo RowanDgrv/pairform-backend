@@ -9,6 +9,7 @@ import {
   admin, corsHeaders, json, userFromReq, OAUTH, functionsBase, randomState,
 } from "../_shared/providers.ts";
 import { GARMIN, garminRequestToken } from "../_shared/garmin.ts";
+import { buildAuthUrl as corosAuthUrl } from "../_shared/corosMcp.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -36,7 +37,16 @@ Deno.serve(async (req) => {
       return json({ url: `${GARMIN.authorizeUrl}?oauth_token=${encodeURIComponent(token)}` });
     }
 
-    // ----- Strava & Coros : OAuth2 « authorization code » -----
+    // ----- Coros : serveur MCP self-service (OAuth 2.1 + PKCE + DCR) -----
+    //  Pas de clé partenaire : le client s'enregistre dynamiquement à la
+    //  première connexion (voir _shared/corosMcp.ts).
+    if (provider === "coros") {
+      const redirectUri = `${functionsBase()}/coros-oauth-callback`;
+      const authUrl = await corosAuthUrl(sb, user.id, redirectUri);
+      return json({ url: authUrl });
+    }
+
+    // ----- Strava : OAuth2 « authorization code » -----
     const cfg = OAUTH[provider];
     if (!cfg) return json({ error: `Plateforme inconnue : ${provider}` }, 400);
     if (!cfg.ready || !cfg.clientId()) return pending();
@@ -53,7 +63,6 @@ Deno.serve(async (req) => {
       state,
     };
     if (provider === "strava") { params.approval_prompt = "auto"; params.scope = cfg.scope; }
-    if (provider === "coros" && cfg.scope) params.scope = cfg.scope;
     return json({ url: `${cfg.authorizeUrl}?` + new URLSearchParams(params).toString() });
   } catch (e) {
     console.error(e);

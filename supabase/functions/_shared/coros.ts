@@ -1,10 +1,12 @@
 // =============================================================================
-//  COROS Open API — OAuth2 + normalisation des activités.
-//  Doc : https://open.coros.com  (accès partenaire requis pour les clés).
-//  Le flux OAuth2 est calqué sur Strava ; les endpoints sont isolés ici pour
-//  être ajustés facilement quand l'accès partenaire est obtenu.
-//  Les noms de champs d'activité sont défensifs (fallbacks) et le payload brut
-//  est toujours conservé dans external_activities.raw.
+//  ⚠️ OBSOLÈTE (07/09/2026) — NE PLUS UTILISER.
+//  COROS a fermé le "COROS Open API" partenaire au profit d'un serveur MCP
+//  hébergé self-service. La nouvelle intégration vit dans _shared/corosMcp.ts
+//  (OAuth 2.1 + PKCE + enregistrement dynamique, sans homologation).
+//  Ce fichier n'est plus importé nulle part ; conservé pour référence /
+//  archéologie du mapping de champs. À supprimer après validation en prod.
+//  ---------------------------------------------------------------------------
+//  COROS Open API — OAuth2 + normalisation des activités. (historique)
 // =============================================================================
 import { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { encryptToken } from "./tokenCrypto.ts";

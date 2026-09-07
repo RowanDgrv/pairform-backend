@@ -115,31 +115,72 @@ retour appli → **Synchroniser** → tes vraies activités apparaissent.
 
 ---
 
-## Garmin / Coros (pour les rendez-vous d'homologation)
-Les **flux complets sont codés** (`device-connect` + `_shared/coros.ts` /
-`_shared/garmin.ts` + callbacks + webhooks). Il ne manque que les **clés
-partenaire** (self-service impossible, contrairement à Strava) :
-- **Garmin** : *Garmin Connect Developer Program* (Health/Activity API, **OAuth 1.0a**,
-  signeur HMAC-SHA1 validé par test). Callback domain à régler = ton domaine
-  functions. Webhook (push/ping) → `…/functions/v1/garmin-webhook`.
-  `GARMIN_CONSUMER_KEY` / `GARMIN_CONSUMER_SECRET`.
-- **Coros** : *COROS Open API* (**OAuth2**). Redirect URI =
-  `…/functions/v1/coros-oauth-callback`. Data subscription → `…/coros-webhook`.
-  `COROS_CLIENT_ID` / `COROS_CLIENT_SECRET`.
+## COROS — serveur MCP self-service (opérationnel, SANS homologation)
 
-Tant que `GARMIN_*` / `COROS_*` sont vides, les boutons Garmin/Coros renvoient
-« intégration en cours d'homologation » — sans casser la démo. Dès réception des
-clés : renseigne-les et déploie ; il restera à **ajuster les noms de champs
-d'activité** au format réel de chaque API (les normaliseurs sont défensifs et
-conservent le payload brut dans `external_activities.raw`).
+Depuis le 07/09/2026, COROS ne passe plus par le "COROS Open API" partenaire mais
+par un **serveur MCP hébergé** (`https://mcpeu.coros.com/mcp`) avec **OAuth 2.1 +
+PKCE + enregistrement dynamique de client** — aucun dossier, aucune clé à obtenir.
 
-> Les endpoints exacts de liste d'activités Coros et le format des push
-> Garmin/Coros peuvent varier selon la version d'API attribuée : à confirmer
-> avec leur doc une fois l'accès obtenu (constantes isolées en haut des fichiers).
+**Code** : `_shared/corosMcp.ts` (remplace `_shared/coros.ts`, obsolète) —
+`device-connect` (URL d'autorisation), `coros-oauth-callback` (échange + import
+initial), `coros-poll` (tirage programmé : le self-service n'a PAS de webhook),
+`coros-webhook` désactivée (410).
 
-> Argumentaire homologation : montre la démo Strava live + ce dépôt
-> (`device_connections`, normalisation `external_activities`, webhooks) comme
-> preuve d'intégration prête côté plateforme.
+**Ce qui remonte** (lecture) : activités (résumé + URL du `.FIT` original dans
+`raw.fit_url`, quota 50 `.fit`/jour/compte), VFC sommeil, récupération, charge —
+rangés dans `device_connections.meta.wellness` + `checkins.hrv` du jour.
+
+**Écriture** (pousser une séance Sillance vers la montre) : `pushPlannedSession`
+est **câblé mais inerte** — les tools `generateTrainingPlan`/`updateTrainingPlan`
+sortent de bêta COROS **~mi-septembre 2026**. `corosWriteAvailable()` teste
+`tools/list` et bascule automatiquement dès qu'ils apparaissent.
+
+### Mise en route
+1. **Migration** : `supabase db push` (applique `0043_coros_mcp.sql` :
+   `device_connections.meta`, table `integration_oauth_clients`, vue `my_devices`).
+2. **Secret** (si pas déjà là) : `OAUTH_TOKEN_ENC_KEY` + `CRON_SECRET`.
+   Facultatif : `COROS_MCP_CLIENT_ID` (fige le client au lieu du DCR auto),
+   `COROS_MCP_BASE` (défaut zone EU).
+3. **Valider la mécanique MCP** (2 min, un login navigateur) :
+   ```bash
+   node test/coros-mcp-spike.mjs      # ouvre l'autorisation COROS, teste tout
+   ```
+   Vert → déploie. Rouge → l'erreur pointe l'ajustement à faire dans corosMcp.ts.
+4. **Déployer** :
+   ```bash
+   supabase functions deploy device-connect device-sync
+   supabase functions deploy coros-oauth-callback --no-verify-jwt
+   supabase functions deploy coros-poll           --no-verify-jwt
+   supabase functions deploy coros-webhook        --no-verify-jwt
+   ```
+5. **Planifier le tirage** (SQL Editor du dashboard, une fois — hors migration
+   versionnée, comme morning-digest) :
+   ```sql
+   select cron.schedule(
+     'coros-poll', '17 */2 * * *',           -- toutes les 2 h, minute 17
+     $$ select net.http_post(
+          url := 'https://onbsgohvqejccowfnrbs.supabase.co/functions/v1/coros-poll',
+          headers := jsonb_build_object(
+            'Content-Type','application/json',
+            'x-cron-secret', current_setting('app.settings.cron_secret', true)),
+          body := '{}'::jsonb) $$);
+   ```
+   (`alter database postgres set app.settings.cron_secret = '<même valeur que CRON_SECRET>';`
+   si pas déjà fait pour coach-alert-on-checkin.)
+6. Athlète : **Connecter COROS** → login COROS → retour appli → activités +
+   « état de forme » remontent. Bouton **Synchroniser** = `device-sync` (pull
+   immédiat) ; sinon `coros-poll` s'en charge toutes les 2 h.
+
+## Garmin (toujours en attente d'homologation)
+Flux codé (`_shared/garmin.ts` + callbacks + `garmin-webhook`, **OAuth 1.0a**,
+signeur HMAC-SHA1 validé). *Garmin Connect Developer Program* fermé aux nouveaux
+entrants → veille passive. En attendant : import `.FIT` manuel + COROS.
+`GARMIN_CONSUMER_KEY` / `GARMIN_CONSUMER_SECRET` vides = bouton « en cours
+d'homologation », sans casser la démo.
+
+> Argumentaire (si besoin) : démo Strava + COROS live + ce dépôt
+> (`device_connections`, `external_activities`, `corosMcp.ts`) = preuve
+> d'intégration prête côté plateforme.
 
 ## Aide-mémoire des Edge Functions
 | Function | JWT | Rôle |
@@ -153,11 +194,12 @@ conservent le payload brut dans `external_activities.raw`).
 | coach-subscribe | ✅ | abonnement athlète→coach (suivi récurrent), Connect + fallback |
 | invite-athlete / accept-invite | ✅ | invitations coach→athlète (+email Resend) |
 | video-url | ✅ | URL signée vidéo premium |
-| device-connect | ✅ | démarre l'OAuth (Strava/Coros/Garmin); renvoie l'URL |
+| device-connect | ✅ | démarre l'OAuth (Strava / COROS MCP / Garmin); renvoie l'URL |
 | strava-oauth-callback | ❌ | retour OAuth Strava → stocke jetons + import |
 | strava-webhook | ❌ | push d'activités Strava |
-| coros-oauth-callback | ❌ | retour OAuth2 Coros → jetons + import |
-| coros-webhook | ❌ | data subscription Coros |
+| coros-oauth-callback | ❌ | retour OAuth 2.1 (PKCE) COROS MCP → jetons + import + wellness |
+| coros-poll | ❌ | tirage programmé COROS (pas de webhook en self-service) ; `x-cron-secret` |
+| coros-webhook | ❌ | **désactivée** (410) — le MCP self-service ne pousse pas |
 | garmin-oauth-callback | ❌ | retour OAuth1.0a Garmin → jetons + import |
 | garmin-webhook | ❌ | push/ping d'activités Garmin |
 | device-sync | ✅ | import manuel (Strava/Coros/Garmin) |

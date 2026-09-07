@@ -8,7 +8,10 @@
 //   • Strava  → entièrement implémenté (API publique, inscription immédiate).
 //   • Garmin  → OAuth/endpoints renseignés mais nécessitent l'homologation
 //               "Garmin Connect Developer Program" (clés partenaire).
-//   • Coros   → OAuth2 renseigné, nécessite le "COROS Open API" partner program.
+//   • Coros   → migré vers le serveur MCP self-service : voir _shared/corosMcp.ts
+//               (OAuth 2.1 + PKCE + enregistrement dynamique, sans homologation).
+//               L'entrée OAUTH.coros ci-dessous est CONSERVÉE mais neutralisée
+//               (ready:false) — device-connect court-circuite vers corosMcp.
 // =============================================================================
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { encryptToken } from "./tokenCrypto.ts";
@@ -81,15 +84,16 @@ export const OAUTH: Record<string, OAuthConfig> = {
     clientId: () => Deno.env.get("GARMIN_CONSUMER_KEY"),
     clientSecret: () => Deno.env.get("GARMIN_CONSUMER_SECRET"),
   },
-  // COROS Open API : OAuth2 (mêmes mécaniques que Strava). S'active dès que
-  // COROS_CLIENT_ID est présent (clés via le COROS Open API partner program).
+  // COROS : NE PAS utiliser cette entrée — la connexion passe par le serveur
+  // MCP self-service (_shared/corosMcp.ts), court-circuité dans device-connect.
+  // Neutralisée ici pour qu'aucun autre chemin ne rappelle l'ancienne Open API.
   coros: {
-    ready: true,
-    authorizeUrl: "https://open.coros.com/oauth2/authorize",
-    tokenUrl: "https://open.coros.com/oauth2/accesstoken",
-    scope: "",
-    clientId: () => Deno.env.get("COROS_CLIENT_ID"),
-    clientSecret: () => Deno.env.get("COROS_CLIENT_SECRET"),
+    ready: false,
+    authorizeUrl: "https://mcpeu.coros.com/oauth2/authorize",
+    tokenUrl: "https://mcpeu.coros.com/oauth2/token",
+    scope: "openid mcp.tools offline_access",
+    clientId: () => undefined,
+    clientSecret: () => undefined,
   },
 };
 
