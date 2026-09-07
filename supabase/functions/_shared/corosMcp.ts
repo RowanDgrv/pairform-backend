@@ -260,9 +260,27 @@ export async function mcpCall(token: string, name: string, args: Record<string, 
   if (call.body?.error) throw new Error(`MCP ${name}: ${JSON.stringify(call.body.error)}`);
   const result = call.body?.result ?? {};
   const text = Array.isArray(result.content)
-    ? result.content.filter((c: any) => c?.type === "text").map((c: any) => c.text).join("\n")
+    ? result.content.filter((c: any) => c?.type === "text").map((c: any) => unwrapJsonString(c.text)).join("\n")
     : "";
   return { structured: result.structuredContent ?? null, text };
+}
+
+/**
+ * Certains tools COROS renvoient leur texte DÉJÀ encodé en JSON (guillemets +
+ * "\n" littéraux) — d'autres non (spike 07/09 : querySportRecords/querySleepHrv
+ * doublement encodés, queryActivityFitFileDownloadUrls non). On déballe si
+ * besoin pour que les parsers travaillent sur de vrais retours à la ligne.
+ */
+function unwrapJsonString(s: unknown): string {
+  if (typeof s !== "string") return String(s ?? "");
+  const t = s.trim();
+  if (t.startsWith('"') && t.endsWith('"') && (t.includes("\\n") || t.includes('\\"'))) {
+    try {
+      const parsed = JSON.parse(t);
+      if (typeof parsed === "string") return parsed;
+    } catch { /* pas du JSON valide : on garde tel quel */ }
+  }
+  return s;
 }
 
 /** Liste les tools exposés (pour savoir si l'écriture est disponible). */

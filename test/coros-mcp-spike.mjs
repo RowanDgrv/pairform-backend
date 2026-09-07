@@ -125,14 +125,39 @@ async function main() {
   const canWrite = names.some((n) => /generateTrainingPlan|updateTrainingPlan|createWorkout/i.test(n));
   console.log(`  écriture de plans : ${canWrite ? "OUI ✅ → activer pushPlannedSession" : "pas encore (attendu mi-sept. 2026)"}`);
 
+  // Déballe le texte doublement encodé en JSON (cf. corosMcp.ts::unwrapJsonString)
+  const unwrap = (s) => {
+    if (typeof s !== "string") return String(s ?? "");
+    const t = s.trim();
+    if (t.startsWith('"') && t.endsWith('"') && (t.includes("\\n") || t.includes('\\"'))) {
+      try { const p = JSON.parse(t); if (typeof p === "string") return p; } catch {}
+    }
+    return s;
+  };
   async function call(name, args) {
     const r = await rpc(sid, { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name, arguments: args } });
     if (r.body?.error) throw new Error(`${name}: ${JSON.stringify(r.body.error)}`);
     const res = r.body?.result || {};
     return {
-      text: (res.content || []).filter((c) => c.type === "text").map((c) => c.text).join("\n"),
+      text: (res.content || []).filter((c) => c.type === "text").map((c) => unwrap(c.text)).join("\n"),
       structured: res.structuredContent || null,
     };
+  }
+  // Parse identique à corosMcp.ts::parseSportRecords (vérif du bout en bout)
+  const hms = (x) => { const p = x.split(":").map(Number); return p.length === 3 ? p[0]*3600+p[1]*60+p[2] : p.length === 2 ? p[0]*60+p[1] : p[0]; };
+  function parseRecords(text) {
+    const out = [];
+    for (const b of text.split(/\n(?=\s*\d+\.\s)/)) {
+      const label = b.match(/LabelId:\s*(\d+)/i); if (!label) continue;
+      const head = b.match(/^\s*\d+\.\s*(.+?)\s+[—–-]\s*(\d{4}-\d{2}-\d{2})/m);
+      const sport = b.match(/SportType:\s*(\d+)/i);
+      const dur = b.match(/Duration:\s*([\d:]+)/i);
+      const dist = b.match(/Distance:\s*([\d.]+)\s*km/i);
+      const hr = b.match(/Avg HR:\s*(\d+)/i);
+      out.push({ labelId: label[1], sportType: sport && +sport[1], name: head && head[1].trim(), date: head && head[2],
+        durS: dur && hms(dur[1]), distM: dist && Math.round(parseFloat(dist[1]) * 1000), avgHr: hr && +hr[1] });
+    }
+    return out;
   }
   const ymd = (d = 0) => {
     const x = new Date(Date.now() - d * 864e5);
@@ -141,16 +166,22 @@ async function main() {
 
   console.log("\n— querySportRecords (21 j) —");
   const recs = await call("querySportRecords", { startDate: ymd(21), endDate: ymd(0), sportTypeCodes: [65535], limit: 50 });
-  console.log("structuredContent :", recs.structured ? "OUI (corosMcp.ts devrait le préférer)" : "non → parsing texte");
-  console.log(recs.text.slice(0, 700));
+  console.log("structuredContent :", recs.structured ? "OUI" : "non → parsing texte");
+  console.log("double-encodé JSON :", recs.text.trimStart().startsWith('"') ? "OUI (unwrap requis)" : "non");
+  const parsed = parseRecords(recs.text);
+  console.log(`parseRecords → ${parsed.length} activités. Échantillon :`);
+  console.table(parsed.slice(0, 5));
 
-  const m = recs.text.match(/LabelId:\s*(\d+)\s*\|\s*SportType:\s*(\d+)/i);
-  if (m) {
-    console.log("\n— queryActivityFitFileDownloadUrls —");
-    console.log((await call("queryActivityFitFileDownloadUrls", { labelId: m[1], sportType: +m[2] })).text.slice(0, 300));
+  if (parsed[0]) {
+    console.log("— queryActivityFitFileDownloadUrls —");
+    const fit = await call("queryActivityFitFileDownloadUrls", { labelId: parsed[0].labelId, sportType: parsed[0].sportType });
+    const u = fit.text.match(/https?:\/\/\S+\.fit/i);
+    console.log("URL .FIT extraite :", u ? u[0] : "❌ non trouvée");
   }
   console.log("\n— querySleepHrv —");
-  console.log((await call("querySleepHrv", { startDate: ymd(2), endDate: ymd(0), days: 3 })).text.slice(0, 400));
+  const hrvTxt = (await call("querySleepHrv", { startDate: ymd(2), endDate: ymd(0), days: 3 })).text;
+  const hm = hrvTxt.match(/(\d{4}-\d{2}-\d{2}):\s+HRV Avg:\s*(\d+)\s*ms\s*[—–-]\s*([A-Za-z ]+?)\s+Normal Range:\s*(\d+)\s*-\s*(\d+)\s*ms\s+Baseline:\s*(\d+)/);
+  console.log("parse VFC :", hm ? { date: hm[1], avgMs: +hm[2], eval: hm[3].trim(), base: +hm[6] } : "❌ non parsé");
 
   console.log("\n✅ SPIKE OK — corosMcp.ts / coros-poll peuvent être déployés en confiance.");
   process.exit(0);
