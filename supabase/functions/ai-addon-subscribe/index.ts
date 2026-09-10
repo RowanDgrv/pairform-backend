@@ -1,12 +1,13 @@
 // =============================================================================
-//  Edge Function : ai-addon-subscribe
-//  Le COACH active l'add-on « Assistant IA + Bibliothèque » (~13 €/mois) —
-//  produit Sillance, donc PAS de Connect : c'est Sillance qui encaisse
-//  (contrairement à coach-subscribe où l'argent va au coach).
+//  Edge Function : ai-addon-subscribe   (produit « Sillance + », ~14 €/mois)
+//  Le COACH active l'unique supplément — produit Sillance, PAS de Connect
+//  (c'est Sillance qui encaisse, contrairement à coach-subscribe).
 //
-//  L'add-on débloque : l'analyse IA par séance (session-summary) ET la
-//  bibliothèque officielle de 100 séances (library_sessions, RLS
-//  my_library_access → has_ai_addon). Un seul supplément.
+//  « Sillance + » débloque, d'un seul coup :
+//    • l'analyse IA par séance (session-summary) ;
+//    • la bibliothèque de 100 séances (library_sessions, RLS my_library_access) ;
+//    • les vidéos éducatives (athlete_has_videos → has_ai_addon du coach).
+//  Toutes ces portes passent par has_ai_addon() → l'entitlement ai_addons.
 //
 //  Body : {} (le payeur = l'utilisateur connecté)
 //  Auth : JWT.
@@ -21,7 +22,7 @@ const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY")!, {
   httpClient: Stripe.createFetchHttpClient(),
 });
 const APP_URL = Deno.env.get("APP_URL") ?? "http://localhost:5500";
-const AI_PRICE_EUR = Number(Deno.env.get("AI_ADDON_PRICE_EUR") ?? "13");
+const AI_PRICE_EUR = Number(Deno.env.get("AI_ADDON_PRICE_EUR") ?? "14");
 const AI_PRICE_ID = Deno.env.get("STRIPE_PRICE_AI"); // optionnel : Price fixe
 // Essai gratuit : carte enregistrée au checkout, débit automatique à la fin
 // de l'essai sauf résiliation (portail Stripe). 0 = pas d'essai.
@@ -66,7 +67,7 @@ Deno.serve(async (req) => {
             currency: "eur",
             unit_amount: Math.round(AI_PRICE_EUR * 100),
             recurring: { interval: "month" },
-            product_data: { name: "Sillance — Assistant IA + Bibliothèque de séances" },
+            product_data: { name: "Sillance + — Assistant IA, bibliothèque de séances & vidéos" },
           },
         };
 

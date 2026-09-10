@@ -1,20 +1,23 @@
 -- =============================================================================
---  0045 — Bibliothèque de séances Sillance (incluse dans l'add-on Assistant IA)
+--  0045 — « Sillance + » : l'unique supplément coach (IA + séances + vidéos)
 --  ---------------------------------------------------------------------------
---  Décision produit (10/09/2026) : PAS d'offre "Premium" séparée. L'add-on
---  Assistant IA (0009, ~13 €/mois) débloque AUSSI la bibliothèque de 100
---  séances-types course & vélo. Un seul supplément, argument de vente net :
---  « l'IA d'analyse + 100 séances prêtes à poser, sans les saisir une par une ».
+--  Décision produit (10/09/2026) : deux SKU coach, pas plus.
+--    • Base « utilisation du site »        → 19 €/mois (plat, sans palier).
+--    • Supplément « Sillance + »           → ~14 €/mois (ai-addon-subscribe),
+--      débloque D'UN COUP : l'analyse IA par séance + la bibliothèque de 100
+--      séances-types + les vidéos éducatives.
+--  Argument de vente : « tout prêt, sans saisir les séances une par une ».
 --
---  Entitlement (une seule porte) :
---    ai_addons              = l'add-on du coach (déjà écrit par stripe-webhook).
---    clubs.premium_until    = un club paie pour son staff → ses coachs/admins
---                             + le propriétaire héritent (add-on IA + biblio).
+--  Entitlement (une seule porte pour les trois) :
+--    ai_addons              = le supplément du coach (écrit par stripe-webhook).
+--    clubs.premium_until    = un club paie un forfait → ses coachs/admins + le
+--                             propriétaire héritent.
 --    profiles.staff         = comptes Sillance (accès permanent, gratuit).
 --
 --  Portes :
---    has_ai_addon(uid)       → ÉTENDU : add-on actif OU staff OU club.
---    has_library_access(uid) → = has_ai_addon (la biblio suit l'add-on).
+--    has_ai_addon(uid)       → ÉTENDU : supplément actif OU staff OU club.
+--    has_library_access(uid) → = has_ai_addon.
+--    athlete_has_videos()    → REPOINTÉ sur has_ai_addon (fin du par-siège).
 --    my_library_access()     → wrapper sans argument (auth.uid()) pour la RLS.
 --
 --  RLS : library_sessions n'est LISIBLE que si my_library_access(). Écriture =
@@ -102,6 +105,32 @@ revoke execute on function club_grants_premium(uuid) from public, anon, authenti
 revoke execute on function has_library_access(uuid)  from public, anon, authenticated;
 revoke execute on function has_ai_addon(uuid)        from public, anon, authenticated;
 -- my_library_access() reste exécutable (utilisé par la RLS, ne teste que l'appelant).
+
+-- ---------------------------------------------------------------------------
+--  3 bis. Vidéos éducatives : incluses dans « Sillance + » (fin du par-siège)
+--  ---------------------------------------------------------------------------
+--  Avant : athlete_has_videos() = l'athlète est activé par un coach ET ce coach
+--  a un abonnement `video_seats` actif (5 €/athlète). Ce modèle est ABANDONNÉ.
+--  Maintenant : un athlète voit les vidéos si SON coach a « Sillance + »
+--  (has_ai_addon), et un coach les voit s'il l'a lui-même. Plus d'activation
+--  par athlète, plus de sièges. Les tables video_access / video_seats et la
+--  fonction video-seats-set restent en place mais ne sont plus alimentées
+--  (nettoyage dans une migration ultérieure).
+-- ---------------------------------------------------------------------------
+create or replace function athlete_has_videos()
+returns boolean
+language sql security definer stable
+set search_path = public
+as $$
+  select
+    has_ai_addon(auth.uid())            -- le coach lui-même (ou un self-coach)
+    or exists (
+      select 1 from coach_athlete ca
+      where ca.athlete_id = auth.uid()
+        and ca.status = 'active'
+        and has_ai_addon(ca.coach_id)   -- le coach de l'athlète a « Sillance + »
+    );
+$$;
 
 -- ---------------------------------------------------------------------------
 --  4. library_sessions  (les 100 fiches officielles Sillance)
