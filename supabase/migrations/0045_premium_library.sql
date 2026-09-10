@@ -1,23 +1,21 @@
 -- =============================================================================
---  0045 — Offre "Sillance Premium" : bibliothèque de séances + Assistant IA
+--  0045 — Bibliothèque de séances Sillance (incluse dans l'add-on Assistant IA)
 --  ---------------------------------------------------------------------------
---  Nouvelle offre payante pour les coachs (et pour les clubs) qui débloque :
---    • la bibliothèque de 100 séances-types course & vélo (fiches prêtes, avec
---      objectif, structure, zone cible, justification scientifique, référence) ;
---    • l'add-on Assistant IA (résumés + recommandations par séance) — inclus,
---      donc pas de double paiement avec l'add-on IA autonome (0009).
+--  Décision produit (10/09/2026) : PAS d'offre "Premium" séparée. L'add-on
+--  Assistant IA (0009, ~13 €/mois) débloque AUSSI la bibliothèque de 100
+--  séances-types course & vélo. Un seul supplément, argument de vente net :
+--  « l'IA d'analyse + 100 séances prêtes à poser, sans les saisir une par une ».
 --
---  Modèle d'entitlement (miroir de ai_addons) :
---    coach_premium         = abo Premium d'un coach (écrit par le webhook Stripe).
---    clubs.premium_until    = un club a payé Premium → ses coachs/admins en
---                             héritent tant que la date court.
+--  Entitlement (une seule porte) :
+--    ai_addons              = l'add-on du coach (déjà écrit par stripe-webhook).
+--    clubs.premium_until    = un club paie pour son staff → ses coachs/admins
+--                             + le propriétaire héritent (add-on IA + biblio).
 --    profiles.staff         = comptes Sillance (accès permanent, gratuit).
 --
 --  Portes :
---    has_premium(uid)        → l'utilisateur a Premium (coach OU via club OU staff).
---    has_library_access(uid) → = has_premium (nom explicite côté bibliothèque).
+--    has_ai_addon(uid)       → ÉTENDU : add-on actif OU staff OU club.
+--    has_library_access(uid) → = has_ai_addon (la biblio suit l'add-on).
 --    my_library_access()     → wrapper sans argument (auth.uid()) pour la RLS.
---    has_ai_addon(uid)       → étendu : vrai aussi si has_premium.
 --
 --  RLS : library_sessions n'est LISIBLE que si my_library_access(). Écriture =
 --  service_role (seed ci-dessous + futures mises à jour de contenu).
@@ -34,47 +32,16 @@ comment on column profiles.staff is
 update profiles set staff = true where lower(email) = 'rowandegraeve@gmail.com';
 
 -- ---------------------------------------------------------------------------
---  2. coach_premium  (entitlement Premium par coach — écrit par le webhook)
--- ---------------------------------------------------------------------------
-create table if not exists coach_premium (
-  id                      uuid primary key default gen_random_uuid(),
-  user_id                 uuid not null references profiles(id) on delete cascade,
-  status                  sub_status not null default 'incomplete',
-  stripe_customer_id      text,
-  stripe_subscription_id  text unique,
-  price_id                text,
-  current_period_end      timestamptz,
-  cancel_at_period_end    boolean not null default false,
-  updated_at              timestamptz not null default now(),
-  created_at              timestamptz not null default now()
-);
-create index if not exists idx_coach_premium_user on coach_premium(user_id);
-
-alter table coach_premium enable row level security;
-
-drop policy if exists coach_premium_owner_read on coach_premium;
-create policy coach_premium_owner_read on coach_premium
-  for select using (user_id = auth.uid());   -- écriture = service_role (webhook)
-
-drop trigger if exists trg_coach_premium_updated on coach_premium;
-create trigger trg_coach_premium_updated before update on coach_premium
-  for each row execute function touch_updated_at();
-
-comment on table coach_premium is
-  'Abonnement "Sillance Premium" d''un coach. Écrit UNIQUEMENT par stripe-webhook '
-  '(kind=coach_premium). "Actif ?" via has_premium().';
-
--- ---------------------------------------------------------------------------
---  3. clubs.premium_until  (un club a payé Premium pour son staff)
+--  2. clubs.premium_until  (un club paie l'add-on pour son staff)
 -- ---------------------------------------------------------------------------
 alter table clubs add column if not exists premium_until timestamptz;
 comment on column clubs.premium_until is
   'Fin de période de l''abonnement "Sillance Premium Club". Tant que > now(), '
-  'le propriétaire et les membres role in (coach,admin) ont la bibliothèque + IA. '
-  'Écrit par stripe-webhook (kind=club_premium).';
+  'le propriétaire et les membres role in (coach,admin) ont l''add-on Assistant '
+  'IA + la bibliothèque. Écrit par stripe-webhook (kind=club_premium).';
 
 -- ---------------------------------------------------------------------------
---  4. Helpers d'entitlement
+--  3. Helpers d'entitlement
 -- ---------------------------------------------------------------------------
 create or replace function club_grants_premium(uid uuid)
 returns boolean
@@ -95,47 +62,15 @@ as $$
   );
 $$;
 
-create or replace function has_premium(uid uuid)
-returns boolean
-language sql security definer stable
-set search_path = public
-as $$
-  select
-    exists (select 1 from profiles p where p.id = uid and p.staff)
-    or exists (
-      select 1 from coach_premium cp
-      where cp.user_id = uid
-        and cp.status in ('active', 'trialing')
-        and (cp.current_period_end is null or cp.current_period_end > now())
-    )
-    or club_grants_premium(uid);
-$$;
-
-create or replace function has_library_access(uid uuid)
-returns boolean
-language sql security definer stable
-set search_path = public
-as $$
-  select has_premium(uid);
-$$;
-
--- wrapper sans argument pour la RLS (ne révèle jamais que le statut de l'appelant)
-create or replace function my_library_access()
-returns boolean
-language sql security definer stable
-set search_path = public
-as $$
-  select has_premium(auth.uid());
-$$;
-
--- has_ai_addon : Premium inclut l'Assistant IA (pas de double paiement).
+-- has_ai_addon : l'add-on du coach OU un compte staff OU un coach de club payant.
 create or replace function has_ai_addon(uid uuid)
 returns boolean
 language sql security definer
 set search_path = public
 as $$
   select
-    has_premium(uid)
+    exists (select 1 from profiles p where p.id = uid and p.staff)
+    or club_grants_premium(uid)
     or exists (
       select 1 from ai_addons
       where user_id = uid
@@ -144,15 +79,32 @@ as $$
     );
 $$;
 
+-- La bibliothèque suit exactement l'add-on IA.
+create or replace function has_library_access(uid uuid)
+returns boolean
+language sql security definer stable
+set search_path = public
+as $$
+  select has_ai_addon(uid);
+$$;
+
+-- wrapper sans argument pour la RLS (ne révèle jamais que le statut de l'appelant)
+create or replace function my_library_access()
+returns boolean
+language sql security definer stable
+set search_path = public
+as $$
+  select has_ai_addon(auth.uid());
+$$;
+
 -- Oracle de statut : réservé aux edge functions (service_role bypass les grants).
 revoke execute on function club_grants_premium(uuid) from public, anon, authenticated;
-revoke execute on function has_premium(uuid)          from public, anon, authenticated;
-revoke execute on function has_library_access(uuid)   from public, anon, authenticated;
-revoke execute on function has_ai_addon(uuid)         from public, anon, authenticated;
+revoke execute on function has_library_access(uuid)  from public, anon, authenticated;
+revoke execute on function has_ai_addon(uuid)        from public, anon, authenticated;
 -- my_library_access() reste exécutable (utilisé par la RLS, ne teste que l'appelant).
 
 -- ---------------------------------------------------------------------------
---  5. library_sessions  (les 100 fiches officielles Sillance)
+--  4. library_sessions  (les 100 fiches officielles Sillance)
 -- ---------------------------------------------------------------------------
 create table if not exists library_sessions (
   id              uuid primary key default gen_random_uuid(),
@@ -193,11 +145,11 @@ create policy library_sessions_read on library_sessions
 
 comment on table library_sessions is
   'Bibliothèque officielle Sillance : 100 séances-types course & vélo. '
-  'Lisible seulement par les comptes avec Premium (my_library_access). '
+  'Lisible seulement par les comptes ayant l''add-on IA (my_library_access). '
   'Le coach importe une fiche dans SES sessions ou la planifie directement.';
 
 -- ---------------------------------------------------------------------------
---  6. Seed des 100 fiches  (généré depuis content/library/library.json)
+--  5. Seed des 100 fiches  (généré depuis content/library/library.json)
 -- ---------------------------------------------------------------------------
 insert into library_sessions (code, sport, disc, category, title, objective, structure, duration_label, dur_min, dur_max, dur, zone_label, zone_hr, cadence, zone, rpe_low, rpe_high, recovery, level, rationale, reference, tss, sort) values
   ('RUN-EF-01', 'run', 'run', 'Endurance fondamentale', 'Footing EF court', 'Développement de la base aérobie, densité mitochondriale, économie de course', 'Course continue à allure conversationnelle', '30-45 min', 30, 45, 38, '70-78% VMA', '', '', 'Z2', 3, 4, 'Aucune (continu)', 'tous', 'Le volume en endurance fondamentale reste l''un des meilleurs prédicteurs de la performance sur toutes les distances de fond', 'Seiler 2010 ; Fokkema 2020', 31, 1),

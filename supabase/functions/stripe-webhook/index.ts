@@ -108,11 +108,8 @@ async function upsertSubscription(sub: Stripe.Subscription) {
   if (sub.metadata?.kind === "video_seats") {
     return await upsertVideoSeats(sub);
   }
-  // « Sillance Premium » d'un coach (bibliothèque + Assistant IA) → coach_premium.
-  if (sub.metadata?.kind === "coach_premium") {
-    return await upsertCoachPremium(sub);
-  }
-  // « Sillance Premium Club » → date d'expiration portée sur le club.
+  // « Sillance Premium Club » (add-on IA + bibliothèque pour le staff du club)
+  // → date d'expiration portée sur le club.
   if (sub.metadata?.kind === "club_premium") {
     return await upsertClubPremium(sub);
   }
@@ -166,30 +163,6 @@ async function upsertAiAddon(sub: Stripe.Subscription) {
     .from("ai_addons")
     .upsert(row, { onConflict: "stripe_subscription_id" });
   if (error) console.error("Upsert ai_addon échoué :", error);
-}
-
-// « Sillance Premium » d'un coach. Métadonnées posées par premium-subscribe :
-// { kind: "coach_premium", user_id }. Débloque library_sessions + has_ai_addon.
-async function upsertCoachPremium(sub: Stripe.Subscription) {
-  const userId = sub.metadata?.user_id;
-  if (!userId) {
-    console.warn("coach_premium sans user_id :", sub.id);
-    return;
-  }
-  const row = {
-    user_id: userId,
-    status: sub.status,
-    stripe_customer_id: sub.customer as string,
-    stripe_subscription_id: sub.id,
-    price_id: sub.items.data[0]?.price?.id ?? null,
-    current_period_end: new Date(sub.current_period_end * 1000).toISOString(),
-    cancel_at_period_end: sub.cancel_at_period_end,
-    updated_at: new Date().toISOString(),
-  };
-  const { error } = await supabase
-    .from("coach_premium")
-    .upsert(row, { onConflict: "stripe_subscription_id" });
-  if (error) console.error("Upsert coach_premium échoué :", error);
 }
 
 // « Sillance Premium Club ». Métadonnées posées par club-premium-subscribe :

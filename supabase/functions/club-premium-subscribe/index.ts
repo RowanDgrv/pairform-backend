@@ -1,9 +1,10 @@
 // =============================================================================
 //  Edge Function : club-premium-subscribe
 //  Un CLUB souscrit à « Sillance Premium Club » — produit Sillance (PAS de
-//  Connect). Le propriétaire du club paie ; ses coachs/admins (club_members
-//  role in coach,admin) héritent de la bibliothèque + Assistant IA tant que
-//  clubs.premium_until court.
+//  Connect). Le propriétaire du club paie un forfait ; ses coachs/admins
+//  (club_members role in coach,admin) + lui-même héritent de l'add-on
+//  Assistant IA + la bibliothèque de 100 séances tant que clubs.premium_until
+//  court.
 //
 //  Body : { club_id }  — l'appelant doit être owner_id du club.
 //  Auth : JWT.  L'entitlement (clubs.premium_until) est écrit par le webhook.
@@ -17,7 +18,7 @@ const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY")!, {
   httpClient: Stripe.createFetchHttpClient(),
 });
 const APP_URL = Deno.env.get("APP_URL") ?? "http://localhost:5500";
-const CLUB_PREMIUM_PRICE_EUR = Number(Deno.env.get("CLUB_PREMIUM_PRICE_EUR") ?? "79");
+const CLUB_PREMIUM_PRICE_EUR = Number(Deno.env.get("CLUB_PREMIUM_PRICE_EUR") ?? "49");
 const CLUB_PREMIUM_PRICE_ID = Deno.env.get("STRIPE_PRICE_CLUB_PREMIUM");
 const CLUB_PREMIUM_TRIAL_DAYS = Number(Deno.env.get("CLUB_PREMIUM_TRIAL_DAYS") ?? "0");
 

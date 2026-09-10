@@ -204,8 +204,7 @@ d'homologation », sans casser la démo.
 | garmin-webhook | ❌ | push/ping d'activités Garmin |
 | device-sync | ✅ | import manuel (Strava/Coros/Garmin) |
 | device-disconnect | ✅ | délie un compte + révoque le jeton |
-| premium-subscribe | ✅ | checkout « Sillance Premium » coach (bibliothèque + IA) |
-| club-premium-subscribe | ✅ | checkout « Sillance Premium Club » (propriétaire du club) |
+| club-premium-subscribe | ✅ | forfait club « add-on IA + bibliothèque » pour tout le staff (propriétaire du club) |
 | strava-activity-streams | ✅ | détail seconde-par-seconde (GPS/FC/allure/puissance) d'une activité Strava, à la demande + cache |
 
 ## TODO — facturation club (à durcir avant la prod)
@@ -240,31 +239,38 @@ Active le résumé + recommandations par séance (Claude). Voir `SILLANCE-AI-ADD
 
 > Coût maîtrisé : prompt caching des rubriques + cache `session_summaries` (1 appel API max/séance).
 
-## Sillance Premium — bibliothèque de séances + Assistant IA (migration 0045)
+## Bibliothèque de séances — incluse dans l'add-on IA (migration 0045)
 
-Offre payante coach **et** club qui débloque : les **100 séances-types** course & vélo
-(`library_sessions`, fiches prêtes avec objectif / structure / zone / justification /
-référence) **+** l'Assistant IA (inclus, pas de double paiement avec l'add-on 0009).
+**Décision produit (10/09) : pas d'offre "Premium" séparée.** L'add-on Assistant IA
+(0009, `ai-addon-subscribe`, **~13 €/mois**) débloque AUSSI la **bibliothèque de
+100 séances-types** course & vélo (`library_sessions` : objectif / structure / zone /
+justification / référence). Un seul supplément — argument de vente : « l'IA d'analyse
++ 100 séances prêtes à poser, sans les saisir une par une ».
 
-**Entitlement** : `coach_premium` (abo coach, écrit par le webhook), `clubs.premium_until`
-(un club paie → ses membres `role in (coach,admin)` + le propriétaire héritent),
-`profiles.staff` (comptes Sillance, gratuit — **`rowandegraeve@gmail.com` posé staff
-par la migration**). Portes : `has_premium()`, `has_library_access()`, RLS de
-`library_sessions` = `my_library_access()`. `has_ai_addon()` renvoie vrai si Premium.
+**Entitlement (une seule porte)** :
+- `ai_addons` (add-on du coach, déjà écrit par le webhook) ;
+- `clubs.premium_until` (un club paie un forfait → ses `role in (coach,admin)` + le
+  propriétaire héritent de l'add-on IA + biblio) ;
+- `profiles.staff` (**`rowandegraeve@gmail.com` posé staff par la migration** →
+  accès permanent gratuit).
 
-1. **Migration** : `supabase db push` (applique `0045_premium_library.sql` : tables +
-   helpers + **seed des 100 fiches** + grant staff admin).
-2. **Prix** (placeholders — à arrêter) : `PREMIUM_PRICE_EUR` (29), `PREMIUM_TRIAL_DAYS`
-   (14), `CLUB_PREMIUM_PRICE_EUR` (79). Optionnel : `STRIPE_PRICE_PREMIUM` /
-   `STRIPE_PRICE_CLUB_PREMIUM` (Price fixes). `supabase secrets set --env-file .env`.
+`has_ai_addon()` renvoie vrai si l'une des trois ; `has_library_access()` = `has_ai_addon()` ;
+RLS de `library_sessions` = `my_library_access()` (= `has_ai_addon(auth.uid())`).
+
+1. **Migration** : `supabase db push` (applique `0045_premium_library.sql` : table
+   `library_sessions` + **seed des 100 fiches** + `clubs.premium_until` + `profiles.staff`
+   + helpers + grant staff admin).
+2. **Prix** : `AI_ADDON_PRICE_EUR` (13), `CLUB_PREMIUM_PRICE_EUR` (49 — forfait club,
+   placeholder). Optionnel `STRIPE_PRICE_AI` / `STRIPE_PRICE_CLUB_PREMIUM`.
+   `supabase secrets set --env-file .env`.
 3. **Déployer** (gate JWT) :
-   `supabase functions deploy premium-subscribe club-premium-subscribe stripe-webhook`
-4. **Webhook** : aucune config Stripe supplémentaire — `stripe-webhook` route déjà
-   `kind in (coach_premium, club_premium)`. Redéployer la nouvelle version (étape 3).
+   `supabase functions deploy ai-addon-subscribe club-premium-subscribe stripe-webhook`
+4. **Webhook** : aucune config Stripe en plus — `stripe-webhook` route `kind=ai_addon`
+   (existant) et `kind=club_premium`. Redéployer (étape 3).
 5. **Vérif** : `rowandegraeve@gmail.com` lit `library_sessions` immédiatement (staff).
-   Un coach lambda : 0 ligne tant qu'il n'a pas Premium ; après checkout
-   `premium-subscribe` + webhook → `has_premium` = true, la bibliothèque et l'analyse IA
-   s'ouvrent. Club : `club-premium-subscribe` (body `{club_id}`, réservé au propriétaire)
+   Un coach lambda : 0 ligne tant qu'il n'a pas l'add-on ; après checkout
+   `ai-addon-subscribe` + webhook → `has_ai_addon` = true, la bibliothèque ET l'analyse
+   s'ouvrent. Club : `club-premium-subscribe` (body `{club_id}`, propriétaire uniquement)
    → `clubs.premium_until` posé → les coachs du club héritent.
 
 > Contenu : `content/library/library.json` (source parsée) + `parse.mjs`. Pour mettre à
