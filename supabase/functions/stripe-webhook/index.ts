@@ -108,6 +108,11 @@ async function upsertSubscription(sub: Stripe.Subscription) {
   if (sub.metadata?.kind === "video_seats") {
     return await upsertVideoSeats(sub);
   }
+  // « Sillance Premium Club » (add-on IA + bibliothèque pour le staff du club)
+  // → date d'expiration portée sur le club.
+  if (sub.metadata?.kind === "club_premium") {
+    return await upsertClubPremium(sub);
+  }
 
   const userId = sub.metadata?.supabase_user_id;
   const plan = sub.metadata?.plan ?? "athlete";
@@ -158,6 +163,26 @@ async function upsertAiAddon(sub: Stripe.Subscription) {
     .from("ai_addons")
     .upsert(row, { onConflict: "stripe_subscription_id" });
   if (error) console.error("Upsert ai_addon échoué :", error);
+}
+
+// « Sillance Premium Club ». Métadonnées posées par club-premium-subscribe :
+// { kind: "club_premium", club_id }. On porte la date d'expiration sur le club
+// (les coachs/admins du club en héritent via club_grants_premium()).
+async function upsertClubPremium(sub: Stripe.Subscription) {
+  const clubId = sub.metadata?.club_id;
+  if (!clubId) {
+    console.warn("club_premium sans club_id :", sub.id);
+    return;
+  }
+  const active = ["active", "trialing"].includes(sub.status);
+  const premiumUntil = active
+    ? new Date(sub.current_period_end * 1000).toISOString()
+    : null;   // canceled / unpaid / past_due → on retire l'accès
+  const { error } = await supabase
+    .from("clubs")
+    .update({ premium_until: premiumUntil })
+    .eq("id", clubId);
+  if (error) console.error("Upsert club_premium échoué :", error);
 }
 
 // Sièges vidéo du coach : 1 abonnement dont la quantité = nb d'athlètes activés.

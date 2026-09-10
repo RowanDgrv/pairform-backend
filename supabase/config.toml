@@ -79,3 +79,7 @@ verify_jwt = false
 # résolu dans la fonction (assistant_tokens), pas un JWT Supabase.
 [functions.assistant-api]
 verify_jwt = false
+
+# « Sillance + Club » (produit Sillance, payeur = propriétaire du club → JWT).
+[functions.club-premium-subscribe]
+verify_jwt = true

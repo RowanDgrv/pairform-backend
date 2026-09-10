@@ -204,6 +204,7 @@ d'homologation », sans casser la démo.
 | garmin-webhook | ❌ | push/ping d'activités Garmin |
 | device-sync | ✅ | import manuel (Strava/Coros/Garmin) |
 | device-disconnect | ✅ | délie un compte + révoque le jeton |
+| club-premium-subscribe | ✅ | forfait club « add-on IA + bibliothèque » pour tout le staff (propriétaire du club) |
 | strava-activity-streams | ✅ | détail seconde-par-seconde (GPS/FC/allure/puissance) d'une activité Strava, à la demande + cache |
 | assistant-api | ❌ | API lecture/écriture d'UN compte pour un agent externe (ChatGPT/Claude) ; jeton Bearer maison (`assistant_tokens`) |
 
@@ -276,3 +277,42 @@ Active le résumé + recommandations par séance (Claude). Voir `SILLANCE-AI-ADD
    après checkout `ai-addon-subscribe` + webhook, `has_ai_addon` passe à true et l'analyse se génère.
 
 > Coût maîtrisé : prompt caching des rubriques + cache `session_summaries` (1 appel API max/séance).
+
+## « Sillance + » : l'unique supplément coach (migration 0045)
+
+**Décision produit (10/09).** Deux SKU coach :
+- **Base « utilisation du site » — 19 €/mois** (plat, sans palier ; à créer/modifier
+  dans Stripe — un seul Price coach existe aujourd'hui à 29 €).
+- **Supplément « Sillance + » — ~14 €/mois** (`ai-addon-subscribe`) : l'analyse IA
+  par séance **+** la bibliothèque de 100 séances (`library_sessions`) **+** les
+  vidéos éducatives. Argument : « tout prêt, sans saisir les séances une par une ».
+
+**Entitlement — une seule porte pour les trois** :
+- `ai_addons` (le supplément du coach, écrit par le webhook) ;
+- `clubs.premium_until` (un club paie un forfait → ses `role in (coach,admin)` + le
+  propriétaire héritent) ;
+- `profiles.staff` (**`rowandegraeve@gmail.com` posé staff par la migration**).
+
+`has_ai_addon()` = l'une des trois. `has_library_access()` = `has_ai_addon()`.
+`athlete_has_videos()` **repointé** sur `has_ai_addon` (fin du modèle par siège :
+`video_seats` / `video-seats-set` ne sont plus alimentés). RLS `library_sessions`
+= `my_library_access()`.
+
+1. **Migration** : `supabase db push` (`0045_premium_library.sql` : table
+   `library_sessions` + **seed des 100 fiches** + `clubs.premium_until` + `profiles.staff`
+   + helpers + `athlete_has_videos` repointé).
+2. **Prix** : `AI_ADDON_PRICE_EUR` (14), `CLUB_PREMIUM_PRICE_EUR` (49). Optionnel
+   `STRIPE_PRICE_AI` / `STRIPE_PRICE_CLUB_PREMIUM`. `supabase secrets set --env-file .env`.
+3. **Déployer** (gate JWT) :
+   `supabase functions deploy ai-addon-subscribe club-premium-subscribe stripe-webhook`
+4. **Webhook** : aucune config Stripe en plus — `stripe-webhook` route `kind=ai_addon`
+   (existant) et `kind=club_premium`. Redéployer (étape 3).
+5. **Vérif** : `rowandegraeve@gmail.com` lit `library_sessions` immédiatement (staff).
+   Un coach lambda : 0 ligne tant qu'il n'a pas « Sillance + » ; après checkout
+   `ai-addon-subscribe` + webhook → `has_ai_addon` = true → bibliothèque + analyse IA
+   + vidéos s'ouvrent (pour lui et ses athlètes actifs). Club :
+   `club-premium-subscribe` (body `{club_id}`, propriétaire uniquement) →
+   `clubs.premium_until` → les coachs du club héritent.
+
+> Contenu : `content/library/library.json` (source parsée) + `parse.mjs`. Pour mettre à
+> jour une fiche : éditer le docx, re-parser, régénérer le bloc `insert … on conflict`.
