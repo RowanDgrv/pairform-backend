@@ -74,3 +74,8 @@ verify_jwt = false
 
 [functions.coros-webhook]
 verify_jwt = false
+
+# API assistant (ChatGPT / Claude / script perso) : auth par jeton Bearer maison
+# résolu dans la fonction (assistant_tokens), pas un JWT Supabase.
+[functions.assistant-api]
+verify_jwt = false

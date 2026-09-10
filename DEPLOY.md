@@ -205,6 +205,45 @@ d'homologation », sans casser la démo.
 | device-sync | ✅ | import manuel (Strava/Coros/Garmin) |
 | device-disconnect | ✅ | délie un compte + révoque le jeton |
 | strava-activity-streams | ✅ | détail seconde-par-seconde (GPS/FC/allure/puissance) d'une activité Strava, à la demande + cache |
+| assistant-api | ❌ | API lecture/écriture d'UN compte pour un agent externe (ChatGPT/Claude) ; jeton Bearer maison (`assistant_tokens`) |
+
+---
+
+## API assistant (ChatGPT / Claude — usage perso)
+
+Permet de piloter SON compte Sillance depuis un GPT personnalisé : consulter la
+charge, ajouter/modifier des séances, saisir un check-in. Auth = jeton Bearer
+maison (pas un JWT Supabase) qui porte l'`athlete_id` + le droit d'écriture.
+Toute écriture est journalisée (`assistant_writes`, image avant/après).
+
+### Mise en route
+1. **Migration** : `supabase db push` (applique `0044_assistant_api.sql` :
+   `assistant_tokens`, `assistant_writes`, fonction `assistant_mint_token`).
+2. **Déployer** : `supabase functions deploy assistant-api --no-verify-jwt`
+3. **Générer un jeton** (SQL Editor du dashboard, une fois) :
+   ```sql
+   select assistant_mint_token(
+     (select id from profiles where email = 'rowandegraeve@gmail.com'),
+     'ChatGPT perso',
+     true                                   -- can_write (false = lecture seule)
+   );
+   ```
+   → copier la chaîne `sil_…` renvoyée. **Non récupérable ensuite** (seul le hash
+   est stocké). Révocation : `update assistant_tokens set revoked_at = now() where label = 'ChatGPT perso';`
+4. **Créer le GPT** : ChatGPT → *Mes GPT* → *Créer* → onglet *Configurer* →
+   *Créer une nouvelle action* → coller `supabase/functions/assistant-api/openapi.json`
+   → *Authentification* = **Clé API**, type **Bearer**, valeur = le jeton `sil_…`.
+5. Tester : « quelle est ma charge des 3 dernières semaines ? », « ajoute un
+   footing 45 min Z2 vendredi », « note mon check-in : sommeil 7, fatigue 3 ».
+
+### Points d'entrée
+`GET /summary` `/activities` `/sessions` `/session/{id}` `/checkins` `/wellness`
+`/records` `/refs` `/gear` `/history` ·
+écriture : `POST /session` `PATCH /session/{id}` `DELETE /session/{id}?confirm=true`
+`POST|PUT /checkin[/{date}]` `POST /record` `PATCH /refs` `POST /gear` `PATCH /gear/{id}`.
+
+Garde-fous : borné à l'`athlete_id` du jeton · suppression = `confirm=true` + 1 id
+à la fois · 120 écritures / 5 min max · `GET /history` pour revoir/annuler.
 
 ## TODO — facturation club (à durcir avant la prod)
 À traiter avant d'ouvrir les paiements club à de vrais clubs (cf. `club-subscribe`) :

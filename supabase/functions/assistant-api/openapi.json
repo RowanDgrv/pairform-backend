@@ -1,0 +1,245 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Sillance — API assistant",
+    "description": "Lecture et écriture du compte d'entraînement de l'athlète (planning, check-ins, charge, matériel, records). Toutes les opérations portent sur le compte lié au jeton. Les écritures sont journalisées et consultables via /history.",
+    "version": "1.0.0"
+  },
+  "servers": [
+    { "url": "https://onbsgohvqejccowfnrbs.supabase.co/functions/v1/assistant-api" }
+  ],
+  "security": [{ "bearerAuth": [] }],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": { "type": "http", "scheme": "bearer" }
+    },
+    "schemas": {
+      "SessionInput": {
+        "type": "object",
+        "description": "Séance planifiée. Pour une création, date/disc/title sont requis ; pour une modification, tous les champs sont optionnels.",
+        "properties": {
+          "date": { "type": "string", "format": "date", "description": "AAAA-MM-JJ" },
+          "disc": { "type": "string", "enum": ["swim", "bike", "run", "strength", "hyrox", "tri"] },
+          "title": { "type": "string" },
+          "dur": { "type": "integer", "description": "durée en minutes" },
+          "dist": { "type": "number", "description": "distance en km" },
+          "tss": { "type": "integer", "description": "charge d'entraînement (Training Stress Score)" },
+          "zone": { "type": "string", "enum": ["Z1", "Z2", "Z3", "Z4", "Z5"] },
+          "done": { "type": "boolean", "description": "séance réalisée" },
+          "rpe": { "type": "integer", "minimum": 1, "maximum": 10, "description": "ressenti d'effort 1–10" },
+          "blocks": { "type": "array", "items": { "type": "object" }, "description": "structure détaillée (échauffement/corps/retour au calme)" }
+        }
+      },
+      "CheckinInput": {
+        "type": "object",
+        "description": "Check-in matinal. Tous les champs sont optionnels ; au moins un requis.",
+        "properties": {
+          "sommeil": { "type": "integer", "minimum": 1, "maximum": 10 },
+          "fatigue": { "type": "integer", "minimum": 1, "maximum": 10 },
+          "motivation": { "type": "integer", "minimum": 1, "maximum": 10 },
+          "poids": { "type": "number", "description": "kg" },
+          "hrv": { "type": "integer", "description": "VFC en ms" },
+          "dispo": { "type": "string", "description": "disponibilité du jour (ex. 'ok', 'reduit', 'indispo')" },
+          "dispo_note": { "type": "string" }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/summary": {
+      "get": {
+        "operationId": "getSummary",
+        "summary": "Vue d'ensemble : charge (ACWR/CTL/ATL/TSB), séance du jour, semaine à venir, dernier check-in, état de forme montre (COROS), activités récentes, références physiologiques.",
+        "responses": { "200": { "description": "Synthèse", "content": { "application/json": { "schema": { "type": "object" } } } } }
+      }
+    },
+    "/activities": {
+      "get": {
+        "operationId": "getActivities",
+        "summary": "Activités réalisées importées (Strava/COROS).",
+        "parameters": [{ "name": "days", "in": "query", "schema": { "type": "integer", "default": 28, "minimum": 1, "maximum": 365 } }],
+        "responses": { "200": { "description": "Liste d'activités" } }
+      }
+    },
+    "/sessions": {
+      "get": {
+        "operationId": "getSessions",
+        "summary": "Séances planifiées sur une fenêtre de dates.",
+        "parameters": [
+          { "name": "from", "in": "query", "schema": { "type": "string", "format": "date" } },
+          { "name": "to", "in": "query", "schema": { "type": "string", "format": "date" } }
+        ],
+        "responses": { "200": { "description": "Séances planifiées" } }
+      }
+    },
+    "/session": {
+      "post": {
+        "operationId": "createSession",
+        "summary": "Ajoute une séance au planning.",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SessionInput" } } }
+        },
+        "responses": { "201": { "description": "Séance créée" }, "400": { "description": "Entrée invalide" }, "403": { "description": "Jeton en lecture seule" } }
+      }
+    },
+    "/session/{id}": {
+      "get": {
+        "operationId": "getSession",
+        "summary": "Détail d'une séance planifiée.",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Séance" } }
+      },
+      "patch": {
+        "operationId": "updateSession",
+        "summary": "Modifie une séance planifiée (champs fournis uniquement).",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SessionInput" } } }
+        },
+        "responses": { "200": { "description": "Séance modifiée" } }
+      },
+      "delete": {
+        "operationId": "deleteSession",
+        "summary": "Supprime une séance planifiée. Nécessite confirm=true.",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "confirm", "in": "query", "required": true, "schema": { "type": "boolean" } }
+        ],
+        "responses": { "200": { "description": "Séance supprimée (image renvoyée)" } }
+      }
+    },
+    "/checkins": {
+      "get": {
+        "operationId": "getCheckins",
+        "summary": "Check-ins matinaux récents (sommeil, fatigue, motivation, poids, VFC).",
+        "parameters": [{ "name": "days", "in": "query", "schema": { "type": "integer", "default": 14, "minimum": 1, "maximum": 120 } }],
+        "responses": { "200": { "description": "Check-ins" } }
+      }
+    },
+    "/checkin/{date}": {
+      "put": {
+        "operationId": "upsertCheckin",
+        "summary": "Crée ou met à jour le check-in d'une date (AAAA-MM-JJ ; utiliser 'today' pour aujourd'hui via /checkin sans date).",
+        "parameters": [{ "name": "date", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CheckinInput" } } }
+        },
+        "responses": { "200": { "description": "Check-in enregistré" } }
+      }
+    },
+    "/checkin": {
+      "post": {
+        "operationId": "upsertCheckinToday",
+        "summary": "Crée ou met à jour le check-in d'aujourd'hui.",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CheckinInput" } } }
+        },
+        "responses": { "200": { "description": "Check-in enregistré" } }
+      }
+    },
+    "/wellness": {
+      "get": {
+        "operationId": "getWellness",
+        "summary": "État de forme issu de la montre (VFC sommeil, récupération, charge) — COROS.",
+        "responses": { "200": { "description": "Wellness" } }
+      }
+    },
+    "/records": {
+      "get": {
+        "operationId": "getRecords",
+        "summary": "Records personnels.",
+        "responses": { "200": { "description": "Records" } }
+      }
+    },
+    "/record": {
+      "post": {
+        "operationId": "createRecord",
+        "summary": "Ajoute un record personnel (ex. label '10 km', value '38:20').",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": {
+            "type": "object", "required": ["label", "value"],
+            "properties": { "label": { "type": "string" }, "value": { "type": "string" } }
+          } } }
+        },
+        "responses": { "201": { "description": "Record ajouté" } }
+      }
+    },
+    "/refs": {
+      "get": {
+        "operationId": "getRefs",
+        "summary": "Références physiologiques (FTP, PMA, VMA, allure seuil, CSS, FC max/repos…).",
+        "responses": { "200": { "description": "Références" } }
+      },
+      "patch": {
+        "operationId": "updateRefs",
+        "summary": "Met à jour une ou plusieurs références physiologiques.",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": {
+            "type": "object",
+            "properties": {
+              "ftp": { "type": "number" }, "pma": { "type": "number" }, "cp_bike": { "type": "number" },
+              "vma": { "type": "number" }, "cv": { "type": "number" }, "seuil_run": { "type": "number", "description": "allure seuil en s/km" },
+              "css": { "type": "number", "description": "s/100m" }, "fc_max": { "type": "number" }, "fc_repos": { "type": "number" }
+            }
+          } } }
+        },
+        "responses": { "200": { "description": "Références mises à jour" } }
+      }
+    },
+    "/gear": {
+      "get": {
+        "operationId": "getGear",
+        "summary": "Matériel (chaussures, vélos) et kilométrage.",
+        "responses": { "200": { "description": "Matériel" } }
+      },
+      "post": {
+        "operationId": "createGear",
+        "summary": "Ajoute une paire de chaussures ou un vélo.",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": {
+            "type": "object", "required": ["type", "name"],
+            "properties": {
+              "type": { "type": "string", "enum": ["shoe", "bike"] },
+              "name": { "type": "string" }, "brand": { "type": "string" },
+              "km": { "type": "number" }, "max_km": { "type": "number" }
+            }
+          } } }
+        },
+        "responses": { "201": { "description": "Matériel ajouté" } }
+      }
+    },
+    "/gear/{id}": {
+      "patch": {
+        "operationId": "updateGear",
+        "summary": "Met à jour un matériel (km, max_km, retired, name, brand).",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": {
+            "type": "object",
+            "properties": {
+              "km": { "type": "number" }, "max_km": { "type": "number" },
+              "retired": { "type": "boolean" }, "name": { "type": "string" }, "brand": { "type": "string" }
+            }
+          } } }
+        },
+        "responses": { "200": { "description": "Matériel mis à jour" } }
+      }
+    },
+    "/history": {
+      "get": {
+        "operationId": "getHistory",
+        "summary": "Journal des écritures faites par l'assistant (avec image avant/après pour annuler à la main).",
+        "parameters": [{ "name": "limit", "in": "query", "schema": { "type": "integer", "default": 20, "minimum": 1, "maximum": 100 } }],
+        "responses": { "200": { "description": "Journal" } }
+      }
+    }
+  }
+}
