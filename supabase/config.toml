@@ -74,3 +74,10 @@ verify_jwt = false
 
 [functions.coros-webhook]
 verify_jwt = false
+
+# Sillance Premium (produit Sillance, payeur = utilisateur connecté → JWT requis).
+[functions.premium-subscribe]
+verify_jwt = true
+
+[functions.club-premium-subscribe]
+verify_jwt = true

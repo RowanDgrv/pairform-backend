@@ -4,3 +4,9 @@
 node_modules/
 supabase/.branches/
 supabase/.temp/
+
+deno1.lock
+
+# deno (type-check local)
+deno.lock
+content/library/source-extract.txt
