@@ -100,20 +100,17 @@ export const OAUTH: Record<string, OAuthConfig> = {
   // comme 3e connecteur en attendant que le programme Garmin rouvre.
   // Jeton d'échange = Basic auth (pas JSON) → géré par polarExchangeCode ci-dessous,
   // pas par le flux générique utilisé pour Strava.
-  // Client créé après la bascule de Polar vers son nouveau système "V4"
-  // (constaté 17/09 sur admin.polaraccesslink.com : "V4 clients using
-  // auth.polar.com"). Les anciennes URLs V3 (flow.polar.com/polarremote.com)
-  // renvoient une erreur générique pour un client V4 — ne PAS y revenir.
+  // Client "V4" (auth.polar.com — confirmé par la doc officielle
+  // https://www.polar.com/polar-api-v4/). Le scope N'EST PAS optionnel en V4 :
+  // c'est une liste de permissions "resource:read" séparées par des espaces
+  // (ex. training_sessions:read), à ne pas confondre avec l'ancien scope V3
+  // "accesslink.read_all" (qui échoue) ni avec une absence de scope (qui
+  // échoue aussi — bug des deux tentatives précédentes, corrigé le 17/09).
   polar: {
     ready: true,
     authorizeUrl: "https://auth.polar.com/oauth/authorize",
     tokenUrl: "https://auth.polar.com/oauth/token",
-    // Pas de paramètre "scope" classique : les droits sont déclarés au niveau
-    // du client via des cases "Data subscriptions" sur admin.polaraccesslink.com
-    // (Exercise/Daily activity/Physical information), pas via OAuth scope.
-    // Envoyer scope=accesslink.read_all (valeur V3) faisait échouer l'étape
-    // de consentement après connexion pour ce client V4 (testé 17/09).
-    scope: "",
+    scope: "training_sessions:read",
     clientId: () => Deno.env.get("POLAR_CLIENT_ID"),
     clientSecret: () => Deno.env.get("POLAR_CLIENT_SECRET"),
   },
@@ -381,15 +378,17 @@ export async function polarValidToken(sb: SupabaseClient, conn: any): Promise<st
  *  été observé sur une vraie réponse. */
 function normalizePolarActivity(a: any, userId: string) {
   const id = a.id ?? a["exercise-id"] ?? a.exerciseId ?? a["training-session-id"];
-  const sport = a.sport ?? a["detailed-sport-info"] ?? a.type ?? "";
-  const hr = a.heart_rate ?? a["heart-rate"] ?? {};
+  const sportObj = a.sport ?? {};
+  const sport = (typeof sportObj === "string" ? sportObj : sportObj.name) ??
+    a["detailed-sport-info"] ?? a.type ?? "";
+  const hr = a["heart-rate"] ?? a.heart_rate ?? {};
   return {
     user_id: userId,
     provider: "polar" as Provider,
     provider_activity_id: String(id),
     disc: discFromPolar(sport),
     name: sport || null,
-    start_time: a.start_time ?? a["start-time"] ?? null,
+    start_time: a.startTime ?? a.start_time ?? a["start-time"] ?? null,
     duration_s: parseIsoDuration(a.duration),
     distance_m: a.distance ?? null,
     elevation_m: null,
@@ -407,7 +406,7 @@ function normalizePolarActivity(a: any, userId: string) {
  *  malgré une liste non vide, pour ajuster vite sans deviner davantage. */
 export async function polarImportRecent(sb: SupabaseClient, conn: any): Promise<number> {
   const token = await polarValidToken(sb, conn);
-  const res = await fetch(`${POLAR_API_V4}/training-sessions`, {
+  const res = await fetch(`${POLAR_API_V4}/training-sessions/list`, {
     headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
   });
   if (!res.ok) throw new Error(`Polar training-sessions: ${res.status} ${await res.text()}`);
