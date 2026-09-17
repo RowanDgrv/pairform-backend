@@ -1,10 +1,9 @@
 // =============================================================================
 //  Edge Function : polar-oauth-callback
 //  Polar redirige le NAVIGATEUR ici après autorisation (donc pas de JWT —
-//  déployer avec `--no-verify-jwt`). Spécificités Polar vs Strava :
-//   • échange de code en Basic Auth (polarExchangeCode), pas en JSON.
-//   • un utilisateur DOIT être enregistré (POST /v3/users) avant tout accès
-//     aux données — fait ici juste après l'échange de jetons.
+//  déployer avec `--no-verify-jwt`). Client "V4" (auth.polar.com). Spécificités
+//  Polar vs Strava : échange de code en Basic Auth (polarExchangeCode), pas en
+//  JSON ; jeton valable 12 h + refresh_token stocké pour les syncs suivantes.
 //  Query : ?code=...&state=...  (ou ?error=access_denied)
 // =============================================================================
 import {
@@ -42,7 +41,7 @@ Deno.serve(async (req) => {
       provider: "polar",
       provider_user_id: t.x_user_id ? String(t.x_user_id) : null,
       access_token: await encryptToken(t.access_token),
-      refresh_token: null, // AccessLink ne documente pas de refresh token
+      refresh_token: await encryptToken(t.refresh_token ?? null), // fourni en V4 (jeton 12h)
       expires_at: t.expires_in ? new Date(Date.now() + Number(t.expires_in) * 1000).toISOString() : null,
       scope: null,
     }, { onConflict: "user_id,provider" }).select().single();

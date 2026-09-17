@@ -100,10 +100,14 @@ export const OAUTH: Record<string, OAuthConfig> = {
   // comme 3e connecteur en attendant que le programme Garmin rouvre.
   // Jeton d'échange = Basic auth (pas JSON) → géré par polarExchangeCode ci-dessous,
   // pas par le flux générique utilisé pour Strava.
+  // Client créé après la bascule de Polar vers son nouveau système "V4"
+  // (constaté 17/09 sur admin.polaraccesslink.com : "V4 clients using
+  // auth.polar.com"). Les anciennes URLs V3 (flow.polar.com/polarremote.com)
+  // renvoient une erreur générique pour un client V4 — ne PAS y revenir.
   polar: {
     ready: true,
-    authorizeUrl: "https://flow.polar.com/oauth2/authorization",
-    tokenUrl: "https://polarremote.com/v2/oauth2/token",
+    authorizeUrl: "https://auth.polar.com/oauth/authorize",
+    tokenUrl: "https://auth.polar.com/oauth/token",
     scope: "accesslink.read_all",
     clientId: () => Deno.env.get("POLAR_CLIENT_ID"),
     clientSecret: () => Deno.env.get("POLAR_CLIENT_SECRET"),
@@ -271,14 +275,19 @@ export async function stravaImportRecent(sb: SupabaseClient, conn: any, perPage 
 }
 
 // -----------------------------------------------------------------------------
-//  Polar AccessLink
+//  Polar AccessLink (client "V4", auth.polar.com — voir OAUTH.polar)
 //  ---------------------------------------------------------------------------
-//  Particularités vs Strava : échange de code en Basic Auth (pas JSON), et un
-//  utilisateur DOIT être explicitement enregistré (POST /v3/users) juste après
-//  le premier échange de jetons — sans ça, tous les appels de données échouent.
-//  Pas de mécanisme de refresh documenté : le jeton est traité comme longue durée.
+//  Particularités vs Strava : échange de code en Basic Auth (pas JSON).
+//  Jeton d'accès valable 12 h + refresh_token fourni (contrairement à V3) →
+//  polarValidToken() rafraîchit avant chaque sync, comme pour Strava.
+//  L'enregistrement explicite POST /v3/users (obligatoire en V3) n'existe
+//  plus documenté en V4 — appel laissé en best-effort (voir polarRegisterUser).
+//  ⚠️ Chemin/format exact des endpoints de données V4 non confirmé à 100% par
+//  une vraie réponse ; polarImportRecent journalise le JSON brut au premier
+//  échec de mapping pour ajuster vite si les noms de champs diffèrent.
 // -----------------------------------------------------------------------------
-const POLAR_API = "https://www.polaraccesslink.com/v3";
+const POLAR_API_V3 = "https://www.polaraccesslink.com/v3";     // register user (best-effort)
+const POLAR_API_V4 = "https://www.polaraccesslink.com/v4/data"; // exercices/activité
 
 /** Mappe un sport Polar vers une discipline de l'app. */
 export function discFromPolar(sport: string): string | null {
@@ -315,9 +324,11 @@ export async function polarExchangeCode(code: string, redirectUri: string): Prom
   return res.json();
 }
 
-/** Enregistre l'utilisateur côté Polar (obligatoire avant tout accès aux données). */
+/** Enregistre l'utilisateur côté Polar. Best-effort : ce endpoint est
+ *  documenté pour V3 seulement ; en V4 il peut renvoyer 404, ce qui est
+ *  silencieusement ignoré (n'importe pas pour la suite). */
 export async function polarRegisterUser(accessToken: string, memberId: string): Promise<void> {
-  const res = await fetch(`${POLAR_API}/users`, {
+  const res = await fetch(`${POLAR_API_V3}/users`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -326,24 +337,59 @@ export async function polarRegisterUser(accessToken: string, memberId: string): 
     },
     body: JSON.stringify({ "member-id": memberId }),
   });
-  // 409 = déjà enregistré (reconnexion) — pas une erreur.
-  if (!res.ok && res.status !== 409) throw new Error(`Polar register user: ${res.status} ${await res.text()}`);
+  // 409 = déjà enregistré, 404 = endpoint absent en V4 — ni l'un ni l'autre n'est bloquant.
+  if (!res.ok && res.status !== 409 && res.status !== 404) {
+    console.error(`Polar register user: ${res.status} ${await res.text()}`);
+  }
 }
 
-/** Active de l'API Polar → ligne `external_activities`. */
+/** Renvoie un access_token Polar valide, en rafraîchissant si besoin (jetons
+ *  V4 valables 12 h) et en persistant les nouveaux jetons. */
+export async function polarValidToken(sb: SupabaseClient, conn: any): Promise<string> {
+  const now = Math.floor(Date.now() / 1000);
+  const exp = conn.expires_at ? Math.floor(new Date(conn.expires_at).getTime() / 1000) : 0;
+  if (conn.access_token && exp - 60 > now) return conn.access_token;
+  if (!conn.refresh_token) return conn.access_token; // pas de refresh dispo, on tente tel quel
+
+  const basic = btoa(`${OAUTH.polar.clientId()}:${OAUTH.polar.clientSecret()}`);
+  const res = await fetch(OAUTH.polar.tokenUrl, {
+    method: "POST",
+    headers: {
+      "Authorization": `Basic ${basic}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+      "Accept": "application/json",
+    },
+    body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: conn.refresh_token }),
+  });
+  if (!res.ok) throw new Error(`Polar refresh: ${res.status} ${await res.text()}`);
+  const t = await res.json();
+  await sb.from("device_connections").update({
+    access_token: await encryptToken(t.access_token),
+    refresh_token: await encryptToken(t.refresh_token ?? conn.refresh_token),
+    expires_at: t.expires_in ? new Date(Date.now() + Number(t.expires_in) * 1000).toISOString() : null,
+  }).eq("id", conn.id);
+  return t.access_token;
+}
+
+/** Active de l'API Polar → ligne `external_activities`. Tolérant aux variantes
+ *  de nommage (snake_case / kebab-case) tant que le format exact V4 n'a pas
+ *  été observé sur une vraie réponse. */
 function normalizePolarActivity(a: any, userId: string) {
+  const id = a.id ?? a["exercise-id"] ?? a.exerciseId ?? a["training-session-id"];
+  const sport = a.sport ?? a["detailed-sport-info"] ?? a.type ?? "";
+  const hr = a.heart_rate ?? a["heart-rate"] ?? {};
   return {
     user_id: userId,
     provider: "polar" as Provider,
-    provider_activity_id: String(a.id),
-    disc: discFromPolar(a.sport || ""),
-    name: a.sport ?? null,
-    start_time: a.start_time ?? null,
+    provider_activity_id: String(id),
+    disc: discFromPolar(sport),
+    name: sport || null,
+    start_time: a.start_time ?? a["start-time"] ?? null,
     duration_s: parseIsoDuration(a.duration),
     distance_m: a.distance ?? null,
     elevation_m: null,
-    avg_hr: a.heart_rate?.average ?? null,
-    max_hr: a.heart_rate?.maximum ?? null,
+    avg_hr: hr.average ?? a["heart-rate-average"] ?? null,
+    max_hr: hr.maximum ?? a["heart-rate-maximum"] ?? null,
     avg_power: null,
     avg_speed: null,
     calories: a.calories ?? null,
@@ -351,17 +397,22 @@ function normalizePolarActivity(a: any, userId: string) {
   };
 }
 
-/** Importe les exercices Polar disponibles (30 derniers jours, uploadés après
- *  l'enregistrement — contrainte de l'API, pas de notre fait). */
+/** Importe les activités Polar récentes. Endpoint/format V4 pas confirmé par
+ *  une vraie réponse : journalise le JSON brut si le mapping tombe à 0 ligne
+ *  malgré une liste non vide, pour ajuster vite sans deviner davantage. */
 export async function polarImportRecent(sb: SupabaseClient, conn: any): Promise<number> {
-  const res = await fetch(`${POLAR_API}/exercises`, {
-    headers: { Authorization: `Bearer ${conn.access_token}`, Accept: "application/json" },
+  const token = await polarValidToken(sb, conn);
+  const res = await fetch(`${POLAR_API_V4}/training-sessions`, {
+    headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
   });
-  if (!res.ok) throw new Error(`Polar exercises: ${res.status} ${await res.text()}`);
+  if (!res.ok) throw new Error(`Polar training-sessions: ${res.status} ${await res.text()}`);
   const acts = await res.json();
-  const list = Array.isArray(acts) ? acts : (acts?.exercises ?? []);
+  const list = Array.isArray(acts) ? acts : (acts?.data ?? acts?.["training-sessions"] ?? acts?.exercises ?? []);
   if (!list.length) return 0;
   const rows = list.map((a: any) => normalizePolarActivity(a, conn.user_id));
+  if (rows.some((r) => r.provider_activity_id === "undefined")) {
+    console.error("Polar: format de réponse inattendu, réponse brute :", JSON.stringify(acts).slice(0, 2000));
+  }
   const { error } = await sb.from("external_activities")
     .upsert(rows, { onConflict: "provider,provider_activity_id" });
   if (error) throw error;
