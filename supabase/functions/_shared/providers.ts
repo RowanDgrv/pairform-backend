@@ -108,7 +108,12 @@ export const OAUTH: Record<string, OAuthConfig> = {
     ready: true,
     authorizeUrl: "https://auth.polar.com/oauth/authorize",
     tokenUrl: "https://auth.polar.com/oauth/token",
-    scope: "accesslink.read_all",
+    // Pas de paramètre "scope" classique : les droits sont déclarés au niveau
+    // du client via des cases "Data subscriptions" sur admin.polaraccesslink.com
+    // (Exercise/Daily activity/Physical information), pas via OAuth scope.
+    // Envoyer scope=accesslink.read_all (valeur V3) faisait échouer l'étape
+    // de consentement après connexion pour ce client V4 (testé 17/09).
+    scope: "",
     clientId: () => Deno.env.get("POLAR_CLIENT_ID"),
     clientSecret: () => Deno.env.get("POLAR_CLIENT_SECRET"),
   },
