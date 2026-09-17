@@ -171,6 +171,38 @@ sortent de bêta COROS **~mi-septembre 2026**. `corosWriteAvailable()` teste
    « état de forme » remontent. Bouton **Synchroniser** = `device-sync` (pull
    immédiat) ; sinon `coros-poll` s'en charge toutes les 2 h.
 
+## COROS — Daily Data Push (§5.5, en attente d'activation partenaire)
+
+Distinct du MCP self-service ci-dessus. Suite à leur mail du 11/09/2026 (API
+Reference V2.1.1), COROS propose de pousser en HTTPS POST le sommeil/FC repos/
+VFC/pas/calories des 3 derniers jours de chaque athlète connecté, en échange
+d'une URL de réception — ils fournissent alors un couple `client`/`secret`
+STATIQUE (un seul pour tout Sillance, pas par athlète).
+
+**Code** : `_shared/corosPush.ts` + `coros-daily-push` (nouvelle fonction,
+migration `0046_coros_daily_push.sql` : tables `partner_push_credentials` et
+`device_daily_metrics`).
+
+⚠️ **Le PDF ne documente pas l'algorithme de signature** (`signature`/`nonce`/
+`timestamp` sont mentionnés §5.5.1 sans formule). `verifyPush()` ne vérifie
+donc que `client`/`secret` — c'est le seul mécanisme que le document précise
+sans ambiguïté. À faire confirmer par COROS avant d'aller plus loin.
+
+### Mise en route (rien n'est déployé ni activé pour l'instant)
+1. **Migration** : `supabase db push` (applique `0046_coros_daily_push.sql`).
+2. **Déployer** : `supabase functions deploy coros-daily-push --no-verify-jwt`
+   → donne l'URL publique, ex.
+   `https://onbsgohvqejccowfnrbs.supabase.co/functions/v1/coros-daily-push`.
+3. **Répondre à COROS** avec cette URL (voir mail « COROS API Reference
+   V2.1.1 Released ») et, si possible, leur demander l'algorithme de
+   signature exact avant de considérer le point 4 comme fait.
+4. Une fois `client`/`secret` reçus, les enregistrer une fois :
+   ```ts
+   import { savePushCredentials } from "./_shared/corosPush.ts";
+   await savePushCredentials(admin(), "coros", "<client reçu>", "<secret reçu>");
+   ```
+5. COROS teste l'URL en GET (200 attendu — déjà géré) avant d'activer le push.
+
 ## Garmin (toujours en attente d'homologation)
 Flux codé (`_shared/garmin.ts` + callbacks + `garmin-webhook`, **OAuth 1.0a**,
 signeur HMAC-SHA1 validé). *Garmin Connect Developer Program* fermé aux nouveaux
@@ -200,6 +232,7 @@ d'homologation », sans casser la démo.
 | coros-oauth-callback | ❌ | retour OAuth 2.1 (PKCE) COROS MCP → jetons + import + wellness |
 | coros-poll | ❌ | tirage programmé COROS (pas de webhook en self-service) ; `x-cron-secret` |
 | coros-webhook | ❌ | **désactivée** (410) — le MCP self-service ne pousse pas |
+| coros-daily-push | ❌ | push COROS §5.5 (sommeil/FC repos/VFC/pas/calories) — pas encore activé côté COROS |
 | garmin-oauth-callback | ❌ | retour OAuth1.0a Garmin → jetons + import |
 | garmin-webhook | ❌ | push/ping d'activités Garmin |
 | device-sync | ✅ | import manuel (Strava/Coros/Garmin) |

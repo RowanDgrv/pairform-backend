@@ -62,8 +62,8 @@ create or replace view my_devices
 with (security_invoker = true) as
   select id, user_id, provider, provider_user_id, scope,
          (access_token is not null) as connected,
-         meta,
-         last_sync_at, created_at, updated_at
+         last_sync_at, created_at, updated_at,
+         meta
   from device_connections;
 
 comment on view my_devices is
