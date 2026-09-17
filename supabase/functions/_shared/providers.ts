@@ -401,15 +401,39 @@ function normalizePolarActivity(a: any, userId: string) {
   };
 }
 
-/** Importe les activités Polar récentes. Endpoint/format V4 pas confirmé par
- *  une vraie réponse : journalise le JSON brut si le mapping tombe à 0 ligne
- *  malgré une liste non vide, pour ajuster vite sans deviner davantage. */
+/** Importe les activités Polar récentes (30 derniers jours). `from`/`to` sont
+ *  obligatoires sur cet endpoint (confirmé le 17/09 : 400 sans eux) et le
+ *  format exact n'est pas documenté clairement — on tente plusieurs variantes
+ *  ISO 8601 dans l'ordre, la première acceptée est utilisée. */
 export async function polarImportRecent(sb: SupabaseClient, conn: any): Promise<number> {
   const token = await polarValidToken(sb, conn);
-  const res = await fetch(`${POLAR_API_V4}/training-sessions/list`, {
-    headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
-  });
-  if (!res.ok) throw new Error(`Polar training-sessions: ${res.status} ${await res.text()}`);
+  const fromD = new Date(Date.now() - 30 * 24 * 3600 * 1000);
+  const toD = new Date(Date.now() + 24 * 3600 * 1000);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const fmt = (d: Date) => `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}T` +
+    `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
+  // Plusieurs formats candidats — l'API renvoie "could not be parsed as datetime"
+  // pour un ISO 8601 standard, le format exact attendu n'étant pas confirmé.
+  const candidates = [
+    fmt(fromD), // 2026-08-18T00:00:00 (sans zone)
+    fromD.toISOString(), // 2026-08-18T00:00:00.000Z
+    fromD.toISOString().replace(/\.\d{3}Z$/, "Z"), // 2026-08-18T00:00:00Z
+    fmt(fromD) + "+00:00",
+  ];
+  const candidatesTo = [
+    fmt(toD), toD.toISOString(), toD.toISOString().replace(/\.\d{3}Z$/, "Z"), fmt(toD) + "+00:00",
+  ];
+  let res: Response | null = null;
+  let lastErr = "";
+  let url = "";
+  for (let i = 0; i < candidates.length; i++) {
+    url = `${POLAR_API_V4}/training-sessions/list?from=${encodeURIComponent(candidates[i])}&to=${encodeURIComponent(candidatesTo[i])}`;
+    res = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: "application/json" } });
+    if (res.ok) break;
+    lastErr = `${res.status} ${await res.text()}`;
+    res = null;
+  }
+  if (!res) throw new Error(`Polar training-sessions, tous formats rejetés — dernier: ${lastErr}`);
   const acts = await res.json();
   const list = Array.isArray(acts) ? acts : (acts?.data ?? acts?.["training-sessions"] ?? acts?.exercises ?? []);
   if (!list.length) return 0;
