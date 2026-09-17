@@ -95,6 +95,19 @@ export const OAUTH: Record<string, OAuthConfig> = {
     clientId: () => undefined,
     clientSecret: () => undefined,
   },
+  // Polar AccessLink : API publique, inscription self-service immédiate sur
+  // admin.polaraccesslink.com (contrairement à Garmin) — remplace Garmin
+  // comme 3e connecteur en attendant que le programme Garmin rouvre.
+  // Jeton d'échange = Basic auth (pas JSON) → géré par polarExchangeCode ci-dessous,
+  // pas par le flux générique utilisé pour Strava.
+  polar: {
+    ready: true,
+    authorizeUrl: "https://flow.polar.com/oauth2/authorization",
+    tokenUrl: "https://polarremote.com/v2/oauth2/token",
+    scope: "accesslink.read_all",
+    clientId: () => Deno.env.get("POLAR_CLIENT_ID"),
+    clientSecret: () => Deno.env.get("POLAR_CLIENT_SECRET"),
+  },
 };
 
 // -----------------------------------------------------------------------------
@@ -250,6 +263,105 @@ export async function stravaImportRecent(sb: SupabaseClient, conn: any, perPage 
   const acts = await res.json();
   if (!Array.isArray(acts) || acts.length === 0) return 0;
   const rows = acts.map((a) => normalizeStravaActivity(a, conn.user_id));
+  const { error } = await sb.from("external_activities")
+    .upsert(rows, { onConflict: "provider,provider_activity_id" });
+  if (error) throw error;
+  await sb.from("device_connections").update({ last_sync_at: new Date().toISOString() }).eq("id", conn.id);
+  return rows.length;
+}
+
+// -----------------------------------------------------------------------------
+//  Polar AccessLink
+//  ---------------------------------------------------------------------------
+//  Particularités vs Strava : échange de code en Basic Auth (pas JSON), et un
+//  utilisateur DOIT être explicitement enregistré (POST /v3/users) juste après
+//  le premier échange de jetons — sans ça, tous les appels de données échouent.
+//  Pas de mécanisme de refresh documenté : le jeton est traité comme longue durée.
+// -----------------------------------------------------------------------------
+const POLAR_API = "https://www.polaraccesslink.com/v3";
+
+/** Mappe un sport Polar vers une discipline de l'app. */
+export function discFromPolar(sport: string): string | null {
+  const t = (sport || "").toLowerCase();
+  if (t.includes("swim")) return "swim";
+  if (t.includes("cycl") || t.includes("bik")) return "bike";
+  if (t.includes("run") || t.includes("walk") || t.includes("hik")) return "run";
+  if (t.includes("strength") || t.includes("fitness") || t.includes("cross")) return "strength";
+  return null;
+}
+
+/** Convertit une durée ISO 8601 Polar ("PT2H44M30S") en secondes. */
+function parseIsoDuration(iso: string | undefined): number | null {
+  if (!iso) return null;
+  const m = /^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?$/.exec(iso);
+  if (!m) return null;
+  const [, h, min, s] = m;
+  return (Number(h || 0) * 3600) + (Number(min || 0) * 60) + Number(s || 0);
+}
+
+/** Échange un code d'autorisation Polar contre des jetons (Basic Auth). */
+export async function polarExchangeCode(code: string, redirectUri: string): Promise<any> {
+  const basic = btoa(`${OAUTH.polar.clientId()}:${OAUTH.polar.clientSecret()}`);
+  const res = await fetch(OAUTH.polar.tokenUrl, {
+    method: "POST",
+    headers: {
+      "Authorization": `Basic ${basic}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+      "Accept": "application/json",
+    },
+    body: new URLSearchParams({ grant_type: "authorization_code", code, redirect_uri: redirectUri }),
+  });
+  if (!res.ok) throw new Error(`Polar token exchange: ${res.status} ${await res.text()}`);
+  return res.json();
+}
+
+/** Enregistre l'utilisateur côté Polar (obligatoire avant tout accès aux données). */
+export async function polarRegisterUser(accessToken: string, memberId: string): Promise<void> {
+  const res = await fetch(`${POLAR_API}/users`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify({ "member-id": memberId }),
+  });
+  // 409 = déjà enregistré (reconnexion) — pas une erreur.
+  if (!res.ok && res.status !== 409) throw new Error(`Polar register user: ${res.status} ${await res.text()}`);
+}
+
+/** Active de l'API Polar → ligne `external_activities`. */
+function normalizePolarActivity(a: any, userId: string) {
+  return {
+    user_id: userId,
+    provider: "polar" as Provider,
+    provider_activity_id: String(a.id),
+    disc: discFromPolar(a.sport || ""),
+    name: a.sport ?? null,
+    start_time: a.start_time ?? null,
+    duration_s: parseIsoDuration(a.duration),
+    distance_m: a.distance ?? null,
+    elevation_m: null,
+    avg_hr: a.heart_rate?.average ?? null,
+    max_hr: a.heart_rate?.maximum ?? null,
+    avg_power: null,
+    avg_speed: null,
+    calories: a.calories ?? null,
+    raw: a,
+  };
+}
+
+/** Importe les exercices Polar disponibles (30 derniers jours, uploadés après
+ *  l'enregistrement — contrainte de l'API, pas de notre fait). */
+export async function polarImportRecent(sb: SupabaseClient, conn: any): Promise<number> {
+  const res = await fetch(`${POLAR_API}/exercises`, {
+    headers: { Authorization: `Bearer ${conn.access_token}`, Accept: "application/json" },
+  });
+  if (!res.ok) throw new Error(`Polar exercises: ${res.status} ${await res.text()}`);
+  const acts = await res.json();
+  const list = Array.isArray(acts) ? acts : (acts?.exercises ?? []);
+  if (!list.length) return 0;
+  const rows = list.map((a: any) => normalizePolarActivity(a, conn.user_id));
   const { error } = await sb.from("external_activities")
     .upsert(rows, { onConflict: "provider,provider_activity_id" });
   if (error) throw error;

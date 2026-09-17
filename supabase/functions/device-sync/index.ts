@@ -3,7 +3,7 @@
 //  Body : { provider?: 'strava' }   (défaut: strava)
 //  Auth : JWT requis. Renvoie : { imported }.
 // =============================================================================
-import { admin, corsHeaders, json, userFromReq, stravaImportRecent } from "../_shared/providers.ts";
+import { admin, corsHeaders, json, userFromReq, stravaImportRecent, polarImportRecent } from "../_shared/providers.ts";
 import { importRecent as corosImportRecent, fetchWellness as corosWellness } from "../_shared/corosMcp.ts";
 import { garminImportRecent } from "../_shared/garmin.ts";
 import { decryptConn } from "../_shared/tokenCrypto.ts";
@@ -29,6 +29,7 @@ Deno.serve(async (req) => {
       try { await corosWellness(sb, conn); } catch (e) { console.error("coros wellness:", e); }
     }
     else if (provider === "garmin") imported = await garminImportRecent(sb, conn);
+    else if (provider === "polar") imported = await polarImportRecent(sb, conn);
     else return json({ error: `Sync non implémentée pour ${provider}` }, 400);
     return json({ imported });
   } catch (e) {
