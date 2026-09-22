@@ -57,6 +57,14 @@ async function listUsers(sb: ReturnType<typeof admin>) {
     notesByUser.set(n.user_id, arr);
   }
 
+  // Club géré (clubs.owner_id) : un coach peut cumuler "coach de ses athlètes"
+  // ET "gérant d'un club" (cf. sillance-app.core.js, window.__pf_ownsClub) —
+  // affiché dans la page admin pour voir/vérifier ce cumul d'un coup d'œil.
+  const { data: clubs, error: cErr } = await sb.from("clubs").select("id, name, owner_id");
+  if (cErr) throw cErr;
+  const clubByOwner = new Map<string, { id: string; name: string }>();
+  for (const c of clubs ?? []) clubByOwner.set(c.owner_id, { id: c.id, name: c.name });
+
   return (profiles ?? []).map((p) => ({
     id: p.id, role: p.role, full_name: p.full_name, email: p.email,
     created_at: p.created_at, staff: p.staff,
@@ -65,6 +73,7 @@ async function listUsers(sb: ReturnType<typeof admin>) {
     athletes: athletesByCoach.get(p.id) ?? [],
     athleteCount: (athletesByCoach.get(p.id) ?? []).length,
     notes: notesByUser.get(p.id) ?? [],
+    club: clubByOwner.get(p.id) ?? null,
   }));
 }
 
@@ -126,6 +135,26 @@ Deno.serve(async (req) => {
       const { error } = await sb.from("subscriptions").update({ founder: !!founder }).eq("id", row.id);
       if (error) throw error;
       return json({ ok: true });
+    }
+
+    // Donne à un coach la casquette "gérant de club" en plus de son rôle coach
+    // (cumul, pas un changement de rôle — cf. window.__pf_ownsClub côté app).
+    // Ne fait rien s'il a déjà un club : un coach n'en gère qu'un seul ici.
+    if (action === "createClub") {
+      const { userId, name } = p;
+      if (!userId || !name?.trim()) return json({ error: "userId et name requis" }, 400);
+      const { data: existing } = await sb.from("clubs").select("id").eq("owner_id", userId).maybeSingle();
+      if (existing) return json({ error: "Ce compte gère déjà un club." }, 409);
+      const { data: club, error } = await sb.from("clubs")
+        .insert({ name: name.trim(), owner_id: userId }).select("id").single();
+      if (error) throw error;
+      const { error: oErr } = await sb.from("club_offers").insert([
+        { club_id: club.id, tier: "dropin", price: 15, bill_interval: "one_time" },
+        { club_id: club.id, tier: "sub", price: 59, bill_interval: "month" },
+        { club_id: club.id, tier: "coach", price: 119, bill_interval: "month" },
+      ]);
+      if (oErr) throw oErr;
+      return json({ ok: true, clubId: club.id });
     }
 
     if (action === "suspend") {
