@@ -7,7 +7,7 @@
 // =============================================================================
 import {
   admin, corsHeaders, json, userFromReq,
-  stravaValidToken, stravaFetchActivityDetail, stravaFetchStreams, normalizeStravaStreams,
+  stravaValidToken, stravaFetchActivityDetail, stravaFetchStreams, normalizeStravaStreams, normalizeStravaLaps,
 } from "../_shared/providers.ts";
 import { decryptConn } from "../_shared/tokenCrypto.ts";
 
@@ -26,7 +26,7 @@ Deno.serve(async (req) => {
     if (!act) return json({ error: "Activité introuvable" }, 404);
     if (act.provider !== "strava") return json({ error: "Détail seconde-par-seconde disponible uniquement pour Strava" }, 400);
 
-    if (act.points) return json({ points: act.points });
+    if (act.points) return json({ points: act.points, laps: act.laps ?? [] });
 
     const { data: connRow } = await sb.from("device_connections")
       .select("*").eq("user_id", user.id).eq("provider", "strava").maybeSingle();
@@ -39,9 +39,10 @@ Deno.serve(async (req) => {
       stravaFetchStreams(token, act.provider_activity_id),
     ]);
     const points = normalizeStravaStreams(detail, streams, act.disc);
+    const laps = normalizeStravaLaps(detail, act.disc);
 
-    await sb.from("external_activities").update({ points }).eq("id", act.id);
-    return json({ points });
+    await sb.from("external_activities").update({ points, laps }).eq("id", act.id);
+    return json({ points, laps });
   } catch (e) {
     console.error(e);
     return json({ error: "Erreur serveur" }, 500);

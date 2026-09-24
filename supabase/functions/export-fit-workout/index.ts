@@ -175,8 +175,8 @@ function buildFitWorkout(session: SessionInput): Uint8Array {
 }
 
 function safeFileName(s: string): string {
-  return (s || "seance").normalize("NFD").replace(/[̀-ͯ]/g, "")
-    .replace(/[^a-zA-Z0-9-_]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "seance";
+  const ascii = (s || "seance").normalize("NFD").replace(/\p{Diacritic}/gu, "");
+  return ascii.replace(/[^a-zA-Z0-9-_]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "seance";
 }
 
 Deno.serve(async (req) => {

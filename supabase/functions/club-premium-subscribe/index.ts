@@ -85,8 +85,8 @@ Deno.serve(async (req) => {
       },
       payment_method_collection: "always",
       allow_promotion_codes: true,
-      success_url: `${APP_URL}/sillance-club.html?premium=success`,
-      cancel_url: `${APP_URL}/sillance-club.html?premium=cancel`,
+      success_url: `${APP_URL}/sillance-app.html?premium=success`,
+      cancel_url: `${APP_URL}/sillance-app.html?premium=cancel`,
     });
 
     return json({ url: session.url });

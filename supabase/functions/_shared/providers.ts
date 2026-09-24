@@ -222,6 +222,49 @@ export async function stravaFetchStreams(token: string, activityId: string): Pro
   return res.json();
 }
 
+/** Vrais laps Strava (bouton lap pressé sur la montre), au format {start,end,
+ *  durS,distM,avgHr,maxHr,avgSpeedMs,avgWatts,avgCad,elevGain} attendu par
+ *  buildLaps() côté front (sillance-fit.js) — MÊME convention que les laps
+ *  extraits d'un fichier .FIT (indices dans le tableau de points, end
+ *  exclu). Strava fournit start_index/end_index directement alignés sur les
+ *  streams (même ordre, même longueur que normalizeStravaStreams ci-dessous).
+ *
+ *  23/09/2026 : on transmet aussi les stats déjà calculées PAR STRAVA pour
+ *  chaque lap (moving_time notamment), au lieu de forcer buildLaps() à tout
+ *  reconstruire lui-même à partir du seul écart de temps brut entre le 1er et
+ *  le dernier point du lap. Ce dernier calcul casse dès qu'un lap contient une
+ *  pause réelle (feu rouge, arrêt GPS…) : le "temps écoulé" explose alors que
+ *  le "temps de mouvement" (moving_time, ce qu'affichent Coros/Strava) reste
+ *  correct — cas constaté sur une séance réelle où un lap de récup de ~30s
+ *  ressortait à 19'24" côté Sillance alors que Coros affichait bien ~30s.
+ *  moving_time est préféré à elapsed_time pour rester cohérent avec l'app
+ *  d'origine (Coros/Garmin) qui exclut les pauses de ses temps de lap.
+ *  Repli [] si l'activité n'a aucun lap manuel → l'app retombe sur son
+ *  découpage automatique au km (comportement historique, inchangé). */
+export function normalizeStravaLaps(detail: any, disc?: string | null): Array<{
+  start: number; end: number; durS?: number; distM?: number;
+  avgHr?: number; maxHr?: number; avgSpeedMs?: number; avgWatts?: number;
+  avgCad?: number; elevGain?: number;
+}> {
+  const laps = Array.isArray(detail?.laps) ? detail.laps : [];
+  // Même convention que normalizeStravaStreams : Strava compte la cadence
+  // course sur une seule jambe → on double pour retomber sur le pas/min total.
+  const cadMul = disc === "run" ? 2 : 1;
+  return laps
+    .filter((l: any) => l.start_index != null && l.end_index != null && l.end_index > l.start_index)
+    .map((l: any) => ({
+      start: l.start_index, end: l.end_index,
+      durS: (l.moving_time ?? l.elapsed_time) != null ? (l.moving_time ?? l.elapsed_time) : undefined,
+      distM: l.distance != null ? l.distance : undefined,
+      avgHr: l.average_heartrate != null ? Math.round(l.average_heartrate) : undefined,
+      maxHr: l.max_heartrate != null ? Math.round(l.max_heartrate) : undefined,
+      avgSpeedMs: l.average_speed != null ? l.average_speed : undefined,
+      avgWatts: l.average_watts != null ? Math.round(l.average_watts) : undefined,
+      avgCad: l.average_cadence != null ? Math.round(l.average_cadence * cadMul) : undefined,
+      elevGain: l.total_elevation_gain != null ? Math.round(l.total_elevation_gain) : undefined,
+    }));
+}
+
 /** Zippe les séries parallèles Strava (`key_by_type`) en points `{time,lat,lon,alt,
  *  distM,hr,cad,pw,spdMs,stepLen}` — même forme que le parseur .FIT (sillance-fit.js),
  *  pour rejouer TEL QUEL le même modal d'analyse (découplage, IA, comparateur…). */
