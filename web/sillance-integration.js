@@ -91,8 +91,11 @@ const mapSession = (s) => ({ id: s.id, disc: s.disc, title: esc(s.title), dur: s
   ...(s.rpe_muscle != null ? { rpeMuscle: s.rpe_muscle } : {}), note: esc(s.note),
   coachNote: esc(s.coach_note),
   blocksV2: s.blocks && s.blocks.length ? { blocks: s.blocks } : undefined });
-const mapMember  = (m) => ({ id: m.id, name: esc(m.display_name) || "Athlète",
-  disc: m.disc || "tri", since: esc(m.since) || "", group: m.group_id });
+// display_name (membre sans compte) prioritaire, sinon le nom réel du profil
+// lié (join profiles dans getClubMembers) — avant ce fix un membre inscrit
+// via accept-club-invite retombait toujours sur le placeholder "Athlète".
+const mapMember  = (m) => ({ id: m.id, name: esc(m.display_name) || esc(m.profiles?.full_name) || "Athlète",
+  email: esc(m.profiles?.email) || "", disc: m.disc || "tri", since: esc(m.since) || "", group: m.group_id });
 const mapGroup   = (g) => ({ id: g.id, name: esc(g.name), color: g.color, desc: esc(g.description) });
 const mapCreneau = (c) => ({ id: c.id, disc: c.disc, title: esc(c.title), day: c.day,
   time: c.time, dur: c.dur, place: esc(c.place), cap: c.cap, coach: esc(c.coach),
@@ -101,6 +104,31 @@ const mapGear = (g) => ({ id: g.id, type: g.type, name: esc(g.name), brand: esc(
   km: Number(g.km) || 0, max: Number(g.max_km) || 1000,
   cat: g.cat || null, price: g.price != null ? Number(g.price) : null,
   notified: g.notified || [] });
+// Activité réalisée (external_activities) → forme attendue par realisedCard()
+// dans le core (et compatible openStravaAnalysis : {id, disc, name, dur}).
+// Pas de esc() ici : le core échappe au rendu via dispoSafe() (même schéma que
+// les débriefs de course).
+const mapActivity = (a) => ({
+  id: a.id,
+  disc: a.disc || "run",
+  name: a.name || "",
+  dur: a.duration_s ? Math.round(a.duration_s / 60) : 0,
+  dist: a.distance_m ? +(a.distance_m / 1000).toFixed(1) : 0,
+  avgHr: a.avg_hr != null ? Math.round(a.avg_hr) : null,
+  avgPower: a.avg_power != null ? Math.round(a.avg_power) : null,
+  elev: a.elevation_m != null ? Math.round(a.elevation_m) : null,
+  src: a.provider || "strava",
+});
+// Jour local (YYYY-MM-DD) où placer l'activité sur le calendrier : on privilégie
+// l'horodatage local fourni par la plateforme (raw.start_date_local), sinon on
+// retombe sur start_time (UTC) rendu dans le fuseau du navigateur.
+function activityLocalDay(a) {
+  const local = a && a.raw && a.raw.start_date_local;
+  if (typeof local === "string" && /^\d{4}-\d{2}-\d{2}/.test(local)) return local.slice(0, 10);
+  const d = new Date(a && a.start_time);
+  if (isNaN(d)) return null;
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+}
 
 /* ===========================================================================
  *  HYDRATATION — remplit les globales de l'app depuis Supabase
@@ -346,14 +374,25 @@ async function loadPlanningFor(athleteId) {
   const from = new Date(today); from.setDate(from.getDate() - 28);
   const to   = new Date(today); to.setDate(to.getDate() + 28);
   const iso = (d) => d.toISOString().slice(0, 10);
-  const [rows, gearRows, zones] = await Promise.all([
+  const [rows, gearRows, zones, acts] = await Promise.all([
     PF.getPlanning(target, iso(from), iso(to)),
     PF.getGear(target),
     PF.getAthleteZones(target).catch((e) => { console.warn("[PF] getAthleteZones :", e); return null; }),
+    PF.getActivities(200, target).catch((e) => { console.warn("[PF] getActivities :", e); return []; }),
   ]);
   app.clearObj(app.data.planning);
   for (const s of rows) {
     (app.data.planning[s.date] ||= []).push(mapSession(s));
+  }
+  // Activités réalisées (Strava/Coros/…) posées sur le jour où elles ont eu lieu.
+  // Un compte peut tourner sur un core.js pas encore à jour (déploiement en
+  // plusieurs temps) → on ne touche à realised que s'il existe.
+  if (app.data.realised) {
+    app.clearObj(app.data.realised);
+    for (const a of acts) {
+      const day = activityLocalDay(a);
+      if (day) (app.data.realised[day] ||= []).push(mapActivity(a));
+    }
   }
   // Matériel de CET athlète — vide si rien de renseigné, jamais celui d'un autre.
   app.setGear?.(gearRows.map(mapGear));

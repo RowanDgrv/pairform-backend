@@ -588,7 +588,14 @@ export const PF = {
     if (error) throw error; return data;
   },
   async getClubMembers(clubId) {
-    const { data, error } = await sb.from("club_members").select("*, club_groups(name,color)").eq("club_id", clubId).limit(1000);
+    // profiles(full_name,email) : un membre rejoint via accept-club-invite n'a
+    // pas toujours de display_name posé (fix 0057/accept-club-invite côté
+    // écriture) — on retombe sur le nom réel du profil lié pour les membres
+    // déjà en base avant ce fix. Nécessite la policy RLS "profiles: club
+    // owner reads members" (0057), sinon ce join renvoie null en silence.
+    const { data, error } = await sb.from("club_members")
+      .select("*, club_groups(name,color), profiles(full_name,email)")
+      .eq("club_id", clubId).limit(1000);
     if (error) console.warn("[PF] lecture club_members échouée :", error.message);
     return data ?? [];
   },
