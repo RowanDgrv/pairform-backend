@@ -953,6 +953,14 @@ export const PF = {
   async disconnectDevice(provider = "strava") {
     return await this._invoke("device-disconnect", { provider });
   },
+  // Pousse une séance planifiée vers la montre connectée de l'athlète (pour
+  // l'instant : COROS seulement — Polar/Garmin n'ont pas d'écriture self-
+  // service côté API). scheduledSessionId = l'id retourné par scheduleSession.
+  // Lève si la discipline n'est pas poussable (natation/renfo/hyrox) — le
+  // message d'erreur invite alors à proposer l'export .FIT.
+  async pushSessionToWatch(scheduledSessionId, dateIso) {
+    return await this._invoke("push-session-to-watch", { scheduled_session_id: scheduledSessionId, date: dateIso });
+  },
   // Activités importées, normalisées (disc/name/start_time/duration_s/distance_m…).
   async getActivities(limit = 20, athleteId = null) {
     // duplicate_of : exclut les doublons multi-plateformes déjà résolus
