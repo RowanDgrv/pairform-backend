@@ -768,6 +768,19 @@ export const PF = {
     if (error) console.warn("[PF] lecture creneau_attendees échouée :", error.message);
     return data ?? [];
   },
+  // Séances individuelles (coach → un seul athlète, hors créneau) de tous
+  // les adhérents du club sur une fenêtre — calendrier club (0059+), pour
+  // distinguer visuellement club/groupe/individuel. RLS : couverte par
+  // club_coach_manages (0058), un seul appel plutôt qu'un par adhérent.
+  async getClubIndividualSchedule(athleteUids, fromIso, toIso) {
+    if (!athleteUids.length) return [];
+    const { data, error } = await sb.from("scheduled_sessions")
+      .select("id, athlete_id, date, title, dur")
+      .in("athlete_id", athleteUids).is("source_creneau_id", null)
+      .gte("date", fromIso).lte("date", toIso);
+    if (error) { console.warn("[PF] getClubIndividualSchedule :", error.message); return []; }
+    return data ?? [];
+  },
   // Pointage manuel par le gérant du club (RLS : "attendees: club owner all"
   // — le membre lui-même n'a pas encore de policy d'écriture ici, cf. audit
   // 22/09/2026 : le pointage n'était jusque-là jamais persisté, CRENEAUX
