@@ -955,7 +955,11 @@ export const PF = {
   },
   // Activités importées, normalisées (disc/name/start_time/duration_s/distance_m…).
   async getActivities(limit = 20, athleteId = null) {
+    // duplicate_of : exclut les doublons multi-plateformes déjà résolus
+    // (0062) — la même séance importée par Strava ET par la montre ne doit
+    // apparaître qu'une fois (la marque de la montre gagne).
     let q = sb.from("external_activities").select("*")
+      .is("duplicate_of", null)
       .order("start_time", { ascending: false }).limit(limit);
     if (athleteId) q = q.eq("user_id", athleteId);
     const { data } = await q;
