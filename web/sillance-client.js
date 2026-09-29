@@ -693,10 +693,22 @@ export const PF = {
   },
 
   // -------- CLUB --------
+  // Clubs dont je suis propriétaire OU staff (club_members.role coach/admin,
+  // multi-coachs 0054) — avant ce fix, un coach staff ne voyait JAMAIS le
+  // club du tout dans l'app (myClubs ne testait que la propriété), même
+  // avec la RLS club_coach_manages déjà posée côté planning (0058).
   async myClubs() {
-    const { data, error } = await sb.from("clubs").select("*").eq("owner_id", this.user.id);
-    if (error) console.warn("[PF] lecture clubs échouée :", error.message);
-    return data ?? [];
+    const [owned, staffRows] = await Promise.all([
+      sb.from("clubs").select("*").eq("owner_id", this.user.id),
+      sb.from("club_members").select("club_id, role, clubs(*)")
+        .eq("athlete_id", this.user.id).in("role", ["coach", "admin"]),
+    ]);
+    if (owned.error) console.warn("[PF] lecture clubs échouée :", owned.error.message);
+    if (staffRows.error) console.warn("[PF] lecture club_members (staff) échouée :", staffRows.error.message);
+    const byId = new Map();
+    (owned.data ?? []).forEach((c) => byId.set(c.id, c));
+    (staffRows.data ?? []).forEach((r) => { if (r.clubs && !byId.has(r.club_id)) byId.set(r.club_id, r.clubs); });
+    return [...byId.values()];
   },
   async createClub(name) {
     const { data, error } = await sb.from("clubs")

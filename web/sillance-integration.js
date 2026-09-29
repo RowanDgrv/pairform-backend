@@ -179,6 +179,69 @@ function hideHydrateLoader() {
   if (bar) bar.style.display = "none";
 }
 
+// Charge les données d'UN club (membres/créneaux/groupes/compétitions) dans
+// l'app — extrait de la section "club" de hydrate() pour être rejouable
+// depuis le sélecteur de club (renderClubSwitcher) sans repasser par toute
+// l'hydratation. `app`/`uid` passés en paramètres (locaux à hydrate()).
+async function loadClubData(club, app, uid) {
+  window.__pf_clubId = club.id;   // exposé pour les écritures (création créneau)
+  const [members, creneaux, attendance, competitions] = await Promise.all([
+    PF.getClubMembers(club.id),
+    PF.getCreneaux(club.id),
+    PF.getClubAttendance(club.id),
+    PF.getClubCompetitions(club.id),
+  ]);
+  app.replaceArray(app.data.CLUB_ATHLETES, members.map(mapMember));
+  const groups = await PF.sb.from("club_groups").select("*").eq("club_id", club.id);
+  if (groups.data) app.replaceArray(app.data.CLUB_GROUPS, groups.data.map(mapGroup));
+  // Compétitions club (0058, réelles depuis ce jour — COMPETITIONS était
+  // jusque-là 100% démo, jamais persisté) + réponses par athlète.
+  const compRows = competitions.map(c => ({ id: c.id, name: c.name, date: c.date, level: c.level, targetGroupId: c.target_group_id }));
+  app.replaceArray(app.data.COMPETITIONS, compRows);
+  // club_competition_responses.athlete_id = profiles.id, mais le reste du
+  // front (COMPETITION_RESPONSES, competitionTargets) key tout sur
+  // CLUB_ATHLETES[].id = club_members.id — table de correspondance via
+  // athleteUid (posé par mapMember) pour retomber sur les mêmes clés.
+  const responses = await PF.getClubCompetitionResponses(compRows.map(c => c.id));
+  const memberIdByUid = {};
+  app.data.CLUB_ATHLETES.forEach(a => { if (a.athleteUid) memberIdByUid[a.athleteUid] = a.id; });
+  // "Moi" dans CLUB_ATHLETES (auto-inscription créneau, ME_CLUB_ID) —
+  // sans ça tout le module join/confirm restait câblé sur le compte démo.
+  if (memberIdByUid[uid] && app.setMeClubId) app.setMeClubId(memberIdByUid[uid]);
+  const respByKey = {};
+  responses.forEach(r => {
+    const memberId = memberIdByUid[r.athlete_id];
+    if (memberId) respByKey[r.competition_id + ':' + memberId] = { status: r.status };
+  });
+  app.assignObj(app.data.COMPETITION_RESPONSES, respByKey);
+  // Présences réelles (audit 22/09/2026 : mapCreneau posait attendees:[]
+  // en dur, aucun pointage n'était donc jamais visible pour un vrai club).
+  const attByCreneau = {};
+  for (const a of attendance) (attByCreneau[a.creneau_id] ||= []).push(a.athlete_id);
+  app.replaceArray(app.data.CRENEAUX, creneaux.map((c) => ({ ...mapCreneau(c), attendees: attByCreneau[c.id] || [] })));
+  // titre du club affiché
+  const clubNameEl = document.getElementById("clubName");
+  if (clubNameEl) clubNameEl.textContent = club.name;
+  if (typeof app.renderClub === "function") app.renderClub();
+}
+// Sélecteur de club (multi-club — propriétaire + staff, cf. myClubs 0060) :
+// masqué s'il n'y a qu'un seul club, sinon persiste le choix (localStorage)
+// et recharge SES données sans tout ré-hydrater.
+function renderClubSwitcher(clubs, activeId) {
+  const sel = document.getElementById("clubSwitcher");
+  if (!sel) return;
+  if (!clubs || clubs.length <= 1) { sel.hidden = true; return; }
+  sel.innerHTML = clubs.map((c) => `<option value="${c.id}" ${c.id === activeId ? "selected" : ""}>${c.name}</option>`).join("");
+  sel.hidden = false;
+  sel.onchange = () => {
+    const club = clubs.find((c) => c.id === sel.value);
+    if (!club) return;
+    localStorage.setItem("sil_active_club", club.id);
+    const app = A();
+    loadClubData(club, app, PF.user.id).catch((e) => console.warn("[PF] loadClubData échoué :", e));
+  };
+}
+
 async function hydrate() {
   const app = A();
   if (!app) { console.warn("[PF] hook __pf_app absent — app pas prête"); return; }
@@ -342,6 +405,7 @@ async function hydrate() {
 
     section("club", async () => {
       const clubs = await PF.myClubs();
+      window.__pf_myClubs = clubs;
       if (!clubs.length) {
         // Aucun club réel : ne pas laisser le club de démonstration (Muret Goat
         // Squad et ses adhérents fictifs) visible comme si c'était le sien.
@@ -350,47 +414,13 @@ async function hydrate() {
         app.replaceArray(app.data.CRENEAUX, []);
         const el = document.getElementById("clubName");
         if (el) el.textContent = tr("club.myClubFallback");
+        renderClubSwitcher(clubs, null);
         return;
       }
-      const club = clubs[0];
-      window.__pf_clubId = club.id;   // exposé pour les écritures (création créneau)
-      const [members, creneaux, attendance, competitions] = await Promise.all([
-        PF.getClubMembers(club.id),
-        PF.getCreneaux(club.id),
-        PF.getClubAttendance(club.id),
-        PF.getClubCompetitions(club.id),
-      ]);
-      app.replaceArray(app.data.CLUB_ATHLETES, members.map(mapMember));
-      const groups = await PF.sb.from("club_groups").select("*").eq("club_id", club.id);
-      if (groups.data) app.replaceArray(app.data.CLUB_GROUPS, groups.data.map(mapGroup));
-      // Compétitions club (0058, réelles depuis ce jour — COMPETITIONS était
-      // jusque-là 100% démo, jamais persisté) + réponses par athlète.
-      const compRows = competitions.map(c => ({ id: c.id, name: c.name, date: c.date, level: c.level, targetGroupId: c.target_group_id }));
-      app.replaceArray(app.data.COMPETITIONS, compRows);
-      // club_competition_responses.athlete_id = profiles.id, mais le reste du
-      // front (COMPETITION_RESPONSES, competitionTargets) key tout sur
-      // CLUB_ATHLETES[].id = club_members.id — table de correspondance via
-      // athleteUid (posé par mapMember) pour retomber sur les mêmes clés.
-      const responses = await PF.getClubCompetitionResponses(compRows.map(c => c.id));
-      const memberIdByUid = {};
-      app.data.CLUB_ATHLETES.forEach(a => { if (a.athleteUid) memberIdByUid[a.athleteUid] = a.id; });
-      // "Moi" dans CLUB_ATHLETES (auto-inscription créneau, ME_CLUB_ID) —
-      // sans ça tout le module join/confirm restait câblé sur le compte démo.
-      if (memberIdByUid[uid] && app.setMeClubId) app.setMeClubId(memberIdByUid[uid]);
-      const respByKey = {};
-      responses.forEach(r => {
-        const memberId = memberIdByUid[r.athlete_id];
-        if (memberId) respByKey[r.competition_id + ':' + memberId] = { status: r.status };
-      });
-      app.assignObj(app.data.COMPETITION_RESPONSES, respByKey);
-      // Présences réelles (audit 22/09/2026 : mapCreneau posait attendees:[]
-      // en dur, aucun pointage n'était donc jamais visible pour un vrai club).
-      const attByCreneau = {};
-      for (const a of attendance) (attByCreneau[a.creneau_id] ||= []).push(a.athlete_id);
-      app.replaceArray(app.data.CRENEAUX, creneaux.map((c) => ({ ...mapCreneau(c), attendees: attByCreneau[c.id] || [] })));
-      // titre du club affiché
-      const clubNameEl = document.getElementById("clubName");
-      if (clubNameEl) clubNameEl.textContent = club.name;
+      const savedId = localStorage.getItem("sil_active_club");
+      const club = clubs.find((c) => c.id === savedId) || clubs[0];
+      await loadClubData(club, app, uid);
+      renderClubSwitcher(clubs, club.id);
     }),
 
     // Objets connectés (Strava/Garmin/Coros) : état réel + activités importées.
