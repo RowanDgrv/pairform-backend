@@ -17,14 +17,14 @@
 //  `structuredContent` si présent, sinon on parse le texte de façon défensive
 //  et on conserve toujours le brut dans external_activities.raw.
 //
-//  ÉCRITURE (pousser une séance planifiée vers la montre) : les tools d'écriture
-//  (generateTrainingPlan/updateTrainingPlan) sortent de bêta COROS ~mi-septembre
-//  2026 (confirmé par leur équipe le 07/09). pushPlannedSession() est câblé mais
-//  lève tant que `tools/list` ne contient pas l'outil — bascule automatique via
-//  corosWriteAvailable() dès qu'il apparaît, sans refonte.
+//  ÉCRITURE (pousser une séance planifiée vers la montre) : disponible en
+//  vrai depuis le 29/09/2026 (createScheduledWorkout vérifié en direct) —
+//  voir pushPlannedSession plus bas + _shared/corosSessionMap.ts pour la
+//  traduction du format de séance Sillance vers le format COROS.
 // =============================================================================
 import { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { encryptToken } from "./tokenCrypto.ts";
+import { AthleteRef, SillanceSessionForPush, sessionToCorosCourse } from "./corosSessionMap.ts";
 
 // -----------------------------------------------------------------------------
 //  Config
@@ -504,23 +504,55 @@ export async function fetchWellness(sb: SupabaseClient, conn: any): Promise<Reco
 
 // -----------------------------------------------------------------------------
 //  ÉCRITURE — pousser une séance planifiée Sillance vers la montre COROS.
-//  CÂBLÉ MAIS INERTE jusqu'à ~mi-septembre 2026 : les tools generateTrainingPlan
-//  / updateTrainingPlan sortent de bêta COROS à cette date. Dès que `tools/list`
-//  les contient (corosWriteAvailable → true), implémenter le mapping
-//  scheduled_sessions → plan structuré COROS ci-dessous.
+//  Vérifié disponible en direct le 29/09/2026 (createScheduledWorkout répond
+//  correctement) — la note "coming soon" qui gardait ce chemin inerte depuis
+//  la bêta COROS ne s'applique plus. Traduction scheduled_sessions.blocks →
+//  section structurée COROS dans _shared/corosSessionMap.ts (créer/planifier
+//  une séance = createScheduledWorkout, sportType run/cycling seulement —
+//  limite de l'API COROS, pas de Sillance : natation/renfo/hyrox renvoient
+//  "non supporté" à l'appelant, qui doit alors proposer le .FIT).
 // -----------------------------------------------------------------------------
 export async function corosWriteAvailable(sb: SupabaseClient, conn: any): Promise<boolean> {
   try {
     const token = await validToken(sb, conn);
     const tools = await mcpListTools(token);
-    return tools.some((t) => /generateTrainingPlan|updateTrainingPlan|createWorkout/i.test(t));
+    return tools.some((t) => /createScheduledWorkout|createSingleWorkout|scheduleWorkout/i.test(t));
   } catch { return false; }
 }
 
-export async function pushPlannedSession(_sb: SupabaseClient, _conn: any, _session: unknown): Promise<never> {
-  throw new Error(
-    "COROS: écriture indisponible — le serveur MCP n'expose pas encore " +
-    "generateTrainingPlan/updateTrainingPlan (\"coming soon\"). Chemin câblé, " +
-    "à activer dès que COROS livre les tools d'écriture (ou onboarding \"at scale\").",
-  );
+/** yyyyMMdd dans le fuseau donné (COROS attend la date dans le fuseau du
+ *  profil athlète ; on utilise UTC par défaut, comme le reste de l'intégration
+ *  MCP — cohérent avec coros-poll qui ne connaît pas non plus le fuseau réel). */
+function toCorosDate(dateIso: string): string {
+  return dateIso.replace(/-/g, "").slice(0, 8);
+}
+
+/**
+ * Pousse UNE séance planifiée Sillance vers le calendrier COROS de l'athlète
+ * connecté. `session.blocks` = scheduled_sessions.blocks (le format du
+ * créateur : blocs répétés, lignes en % d'une référence physio ou valeur
+ * exacte) ; `dateIso` = la date visée (YYYY-MM-DD).
+ * Lève une erreur explicite si la discipline n'est pas poussable (natation/
+ * renfo/hyrox) — l'appelant doit alors proposer le repli .FIT.
+ */
+export async function pushPlannedSession(
+  sb: SupabaseClient,
+  conn: any,
+  session: SillanceSessionForPush,
+  dateIso: string,
+  athleteRef: AthleteRef,
+): Promise<{ ok: true; text: string }> {
+  const course = sessionToCorosCourse(session, athleteRef);
+  if (!course) {
+    throw new Error(
+      `COROS ne permet pas de créer une séance structurée pour la discipline "${session.disc}" ` +
+      "(seulement course à pied et vélo) — propose l'export .FIT pour cette séance à la place.",
+    );
+  }
+  const token = await validToken(sb, conn);
+  const { text } = await mcpCall(token, "createScheduledWorkout", {
+    date: toCorosDate(dateIso),
+    course,
+  });
+  return { ok: true, text };
 }
