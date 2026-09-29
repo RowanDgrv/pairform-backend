@@ -17,6 +17,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { corsHeaders } from "../_shared/cors.ts";
 import { decryptConn } from "../_shared/tokenCrypto.ts";
 import { importRecent, fetchWellness } from "../_shared/corosMcp.ts";
+import { resolveActivityDuplicates } from "../_shared/activityDedup.ts";
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -54,6 +55,12 @@ Deno.serve(async (req) => {
     try {
       imported += await importRecent(sb, conn, 21, onlyUser ? 20 : 8);
       await fetchWellness(sb, conn);
+      // Une montre déjà connectée gagne sur Strava — c'est ICI, pas au moment
+      // de la connexion, que ça compte le plus (poll récurrent toutes les ~2h).
+      try {
+        const since = new Date(Date.now() - 30 * 86400000).toISOString();
+        await resolveActivityDuplicates(sb, conn.user_id, since);
+      } catch (e) { console.error("dedup:", conn.user_id, e); }
       ok++;
     } catch (e) {
       failed++;

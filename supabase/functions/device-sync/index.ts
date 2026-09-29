@@ -7,6 +7,7 @@ import { admin, corsHeaders, json, userFromReq, stravaImportRecent, polarImportR
 import { importRecent as corosImportRecent, fetchWellness as corosWellness } from "../_shared/corosMcp.ts";
 import { garminImportRecent } from "../_shared/garmin.ts";
 import { decryptConn } from "../_shared/tokenCrypto.ts";
+import { resolveActivityDuplicates } from "../_shared/activityDedup.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -31,6 +32,12 @@ Deno.serve(async (req) => {
     else if (provider === "garmin") imported = await garminImportRecent(sb, conn);
     else if (provider === "polar") imported = await polarImportRecent(sb, conn);
     else return json({ error: `Sync non implémentée pour ${provider}` }, 400);
+    // Une montre déjà connectée gagne sur Strava (la marque de la montre
+    // sert aussi à pousser les séances prévues, cf. corosMcp.pushPlannedSession).
+    try {
+      const since = new Date(Date.now() - 30 * 86400000).toISOString();
+      await resolveActivityDuplicates(sb, user.id, since);
+    } catch (e) { console.error("dedup:", e); }
     return json({ imported });
   } catch (e) {
     console.error(e);

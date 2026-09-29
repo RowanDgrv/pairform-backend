@@ -10,6 +10,7 @@ import {
   admin, appUrl, functionsBase, polarExchangeCode, polarRegisterUser, polarImportRecent,
 } from "../_shared/providers.ts";
 import { encryptToken, decryptConn } from "../_shared/tokenCrypto.ts";
+import { resolveActivityDuplicates } from "../_shared/activityDedup.ts";
 
 Deno.serve(async (req) => {
   const url = new URL(req.url);
@@ -50,6 +51,10 @@ Deno.serve(async (req) => {
 
     let imported = 0;
     try { imported = await polarImportRecent(sb, conn); } catch (e) { console.error("polar import:", e); }
+    try {
+      const since = new Date(Date.now() - 30 * 86400000).toISOString();
+      await resolveActivityDuplicates(sb, st.user_id, since);
+    } catch (e) { console.error("dedup:", e); }
 
     return back(`polar=connected&imported=${imported}`);
   } catch (e) {

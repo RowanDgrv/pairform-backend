@@ -9,6 +9,7 @@ import {
   admin, appUrl, stravaExchangeCode, stravaImportRecent,
 } from "../_shared/providers.ts";
 import { encryptToken, decryptConn } from "../_shared/tokenCrypto.ts";
+import { resolveActivityDuplicates } from "../_shared/activityDedup.ts";
 
 Deno.serve(async (req) => {
   const url = new URL(req.url);
@@ -48,6 +49,11 @@ Deno.serve(async (req) => {
     // Import initial (best-effort — ne bloque pas le retour si ça échoue).
     let imported = 0;
     try { imported = await stravaImportRecent(sb, conn); } catch (e) { console.error("import:", e); }
+    // Dédoublonnage (la montre déjà connectée gagne sur Strava) — best-effort.
+    try {
+      const since = new Date(Date.now() - 30 * 86400000).toISOString();
+      await resolveActivityDuplicates(sb, st.user_id, since);
+    } catch (e) { console.error("dedup:", e); }
 
     return back(`strava=connected&imported=${imported}`);
   } catch (e) {

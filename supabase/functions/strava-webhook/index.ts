@@ -8,6 +8,7 @@
 // =============================================================================
 import { admin, stravaValidToken, normalizeStravaActivity } from "../_shared/providers.ts";
 import { decryptConn } from "../_shared/tokenCrypto.ts";
+import { resolveActivityDuplicates } from "../_shared/activityDedup.ts";
 
 // Global injecté par le runtime Supabase Edge Functions (Deno Deploy), absent
 // des types Deno standards — `deno check` en CI (sans ce runtime) ne le
@@ -67,4 +68,10 @@ async function processActivity(evt: any) {
   const row = normalizeStravaActivity(act, conn.user_id);
   await sb.from("external_activities").upsert(row, { onConflict: "provider,provider_activity_id" });
   await sb.from("device_connections").update({ last_sync_at: new Date().toISOString() }).eq("id", conn.id);
+  // Une montre déjà connectée (Coros/Polar/Garmin) gagne sur Strava — l'ordre
+  // d'arrivée des webhooks n'est pas garanti, on redéduplique à chaque fois.
+  try {
+    const since = new Date(Date.now() - 30 * 86400000).toISOString();
+    await resolveActivityDuplicates(sb, conn.user_id, since);
+  } catch (e) { console.error("dedup:", e); }
 }

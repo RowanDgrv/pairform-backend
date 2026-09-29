@@ -8,6 +8,7 @@
 import { admin, appUrl, functionsBase } from "../_shared/providers.ts";
 import { corosClientId, exchangeCode, importRecent, fetchWellness } from "../_shared/corosMcp.ts";
 import { encryptToken, decryptConn } from "../_shared/tokenCrypto.ts";
+import { resolveActivityDuplicates } from "../_shared/activityDedup.ts";
 
 Deno.serve(async (req) => {
   const url = new URL(req.url);
@@ -49,6 +50,10 @@ Deno.serve(async (req) => {
     let imported = 0;
     try { imported = await importRecent(sb, conn); } catch (e) { console.error("coros import:", e); }
     try { await fetchWellness(sb, conn); } catch (e) { console.error("coros wellness:", e); }
+    try {
+      const since = new Date(Date.now() - 30 * 86400000).toISOString();
+      await resolveActivityDuplicates(sb, st.user_id, since);
+    } catch (e) { console.error("dedup:", e); }
 
     return back(`coros=connected&imported=${imported}`);
   } catch (e) {
