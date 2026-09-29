@@ -108,9 +108,14 @@ const mapGroup   = (g) => ({ id: g.id, name: esc(g.name), color: g.color, desc: 
 // comme hebdomadaire, jamais comme ponctuel daté, et sa description restait
 // invisible — corrigé au passage, nécessaire pour placer correctement les
 // créneaux sur le calendrier club (0058).
+// groups (0059) remplace l'ancien group singulier : un créneau peut cibler
+// plusieurs groupes précis, pas juste "un groupe" ou "tout le club". Repli
+// sur group_id pour une ligne écrite avant 0059 (group_ids alors vide).
 const mapCreneau = (c) => ({ id: c.id, disc: c.disc, title: esc(c.title), day: c.day,
   time: c.time, dur: c.dur, place: esc(c.place), cap: c.cap, coach: esc(c.coach),
-  price: Number(c.price) || 0, group: c.group_id, attendees: [],
+  price: Number(c.price) || 0,
+  groups: (Array.isArray(c.group_ids) && c.group_ids.length) ? c.group_ids : (c.group_id ? [c.group_id] : []),
+  attendees: [],
   recur: c.recur || 'weekly', date: c.date || null, desc: esc(c.description) || '',
   sessionTemplate: c.session_template || null });
 const mapGear = (g) => ({ id: g.id, type: g.type, name: esc(g.name), brand: esc(g.brand) || "",

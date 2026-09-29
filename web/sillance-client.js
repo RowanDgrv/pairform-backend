@@ -415,6 +415,26 @@ export const PF = {
     }).select().single();
     if (error) throw error; return data;
   },
+  // Variante "upsert" pour une séance matérialisée depuis un créneau (0059) :
+  // delete-puis-insert sur (athlete_id, source_creneau_id, date) pour que
+  // ré-enregistrer le contenu du créneau, ou qu'un athlète rejoigne/quitte/
+  // rejoigne, remplace la séance au lieu d'empiler des doublons.
+  async scheduleSessionFromCreneau(athleteId, dateIso, s, creneauId) {
+    await sb.from("scheduled_sessions").delete()
+      .eq("athlete_id", athleteId).eq("source_creneau_id", creneauId).eq("date", dateIso);
+    const { data, error } = await sb.from("scheduled_sessions").insert({
+      athlete_id: athleteId, created_by: this.user.id, date: dateIso,
+      disc: s.disc, title: s.title, dur: s.dur, dist: s.dist, tss: s.tss,
+      zone: s.zone, blocks: s.blocks ?? [], source_creneau_id: creneauId,
+    }).select().single();
+    if (error) throw error; return data;
+  },
+  // Retire la séance matérialisée d'un créneau quitté (désinscription).
+  async unscheduleFromCreneau(athleteId, creneauId, dateIso) {
+    const { error } = await sb.from("scheduled_sessions").delete()
+      .eq("athlete_id", athleteId).eq("source_creneau_id", creneauId).eq("date", dateIso);
+    if (error) throw error; return true;
+  },
   async updateScheduled(id, s) {
     const { data, error } = await sb.from("scheduled_sessions").update({
       disc: s.disc, title: s.title, dur: s.dur, dist: s.dist, tss: s.tss,
