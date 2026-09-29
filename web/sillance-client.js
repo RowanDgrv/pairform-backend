@@ -195,20 +195,22 @@ export const PF = {
   // Liste le matériel actif (athlète connecté, ou un athlète suivi côté coach).
   async getGear(athleteId = this.user.id) {
     const { data, error } = await sb.from("gear")
-      .select("id, type, name, brand, km, max_km, cat, price, notified, retired")
+      .select("id, type, name, brand, km, max_km, cat, session_types, price, notified, retired")
       .eq("athlete_id", athleteId).eq("retired", false)
       .order("created_at", { ascending: true });
     if (error) { console.warn("getGear:", error.message); return []; }
     return data ?? [];
   },
-  // Ajoute un équipement. g = { type, name, brand?, km?, max_km?, cat?, price?, notified? }.
-  // cat : catégorie catalogue (daily/tempo/race/trail, chaussures uniquement).
+  // Ajoute un équipement. g = { type, name, brand?, km?, max_km?, cat?, sessionTypes?, price?, notified? }.
+  // cat : catégorie catalogue (daily/tempo/race/trail, chaussures uniquement, repli legacy).
+  // sessionTypes : usages d'entraînement à choix multiple (easy/interval/tempo/race,
+  // migration 0053) — préféré par recommendShoe() quand renseigné.
   async addGear(g) {
     const { data, error } = await sb.from("gear")
       .insert({ athlete_id: this.user.id, type: g.type, name: g.name,
                 brand: g.brand ?? null, km: g.km ?? 0, max_km: g.max_km ?? 1000,
-                cat: g.cat ?? null, price: g.price ?? null,
-                notified: g.notified ?? [] })
+                cat: g.cat ?? null, session_types: g.sessionTypes?.length ? g.sessionTypes : null,
+                price: g.price ?? null, notified: g.notified ?? [] })
       .select().single();
     if (error) { console.warn("addGear:", error.message); return null; }
     return data;
@@ -413,6 +415,13 @@ export const PF = {
     }).select().single();
     if (error) throw error; return data;
   },
+  async updateScheduled(id, s) {
+    const { data, error } = await sb.from("scheduled_sessions").update({
+      disc: s.disc, title: s.title, dur: s.dur, dist: s.dist, tss: s.tss,
+      zone: s.zone, blocks: s.blocks ?? [],
+    }).eq("id", id).select().single();
+    if (error) throw error; return data;
+  },
   async markSessionDone(id, { done = true, rpe, rpeMuscle } = {}) {
     const payload = { done, rpe };
     // rpe_muscle : colonne 0021 — repli gracieux si pas encore déployée.
@@ -470,6 +479,40 @@ export const PF = {
     if (error) throw error; return data;
   },
 
+  // -------- CALENDRIER DE SAISON + FICHE DE COURSE (table races, migration 0049) --------
+  // athleteId par défaut = soi-même (vue Athlète) ; le coach passe l'id de
+  // l'athlète depuis la fiche athlète — la RLS (is_coach_of) fait la garde,
+  // pas de filtre athlete_id côté client sur update/delete (le coach doit
+  // pouvoir écrire sur des lignes qui ne sont pas les siennes).
+  async getRaces(athleteId = this.user.id) {
+    const { data, error } = await sb.from("races")
+      .select("id, name, location, race_date, type, priority, result, recap")
+      .eq("athlete_id", athleteId).order("race_date", { ascending: true });
+    if (error) { console.warn("[PF] getRaces:", error.message); return []; }
+    return data ?? [];
+  },
+  // r = { athleteId, name, location?, raceDate ('AAAA-MM-JJ'), type?, priority? }.
+  async addRace(r) {
+    const { data, error } = await sb.from("races")
+      .insert({ athlete_id: r.athleteId, name: r.name, location: r.location ?? null,
+                race_date: r.raceDate, type: r.type ?? "run", priority: r.priority ?? "C" })
+      .select().single();
+    if (error) { console.warn("[PF] addRace:", error.message); return null; }
+    return data;
+  },
+  // patch = { name?, location?, race_date?, type?, priority?, result?, recap? }.
+  async updateRace(id, patch) {
+    const { error } = await sb.from("races")
+      .update({ ...patch, updated_at: new Date().toISOString() }).eq("id", id);
+    if (error) console.warn("[PF] updateRace:", error.message);
+    return !error;
+  },
+  async deleteRace(id) {
+    const { error } = await sb.from("races").delete().eq("id", id);
+    if (error) console.warn("[PF] deleteRace:", error.message);
+    return !error;
+  },
+
   // -------- BIBLIOTHÈQUE DE SÉANCES (coach) --------
   async getTemplates() {
     const { data, error } = await sb.from("sessions").select("*")
@@ -486,13 +529,49 @@ export const PF = {
     if (error) throw error; return data;
   },
 
+  // -------- BIBLIOTHÈQUE OFFICIELLE SILLANCE (incluse dans l'add-on IA) --------
+  // 100 séances-types course & vélo. La RLS (my_library_access = has_ai_addon)
+  // ne renvoie de lignes QUE si le compte a l'add-on (coach, club, ou staff).
+  async getLibrarySessions() {
+    const { data, error } = await sb.from("library_sessions").select("*")
+      .eq("published", true).order("sort");
+    if (error) { console.warn("[PF] library_sessions :", error.message); return []; }
+    return data ?? [];
+  },
+  // Bool explicite (pour l'upsell) — ne révèle que le statut de l'appelant.
+  async myLibraryAccess() {
+    const { data, error } = await sb.rpc("my_library_access");
+    if (error) { console.warn("[PF] my_library_access :", error.message); return false; }
+    return data === true;
+  },
+  // Checkout « Sillance Premium Club » (propriétaire du club) → redirige.
+  async subscribeClubPremium(clubId) {
+    const { url } = await this._invoke("club-premium-subscribe", { club_id: clubId });
+    if (url) window.location.href = url;
+  },
+
   // -------- COACH : roster d'athlètes --------
   async myAthletes() {
     const { data, error } = await sb.from("coach_athlete")
       .select("athlete_id, status, profiles:athlete_id(full_name, email)")
       .eq("coach_id", this.user.id).eq("status", "active");
     if (error) console.warn("[PF] lecture coach_athlete échouée :", error.message);
-    return data ?? [];
+    const rows = data ?? [];
+    // Groupe d'entraînement (club_groups) : un coach qui gère aussi un club
+    // peut avoir rangé certains de ses athlètes suivis dans un groupe — sans
+    // ça, openAssign() (assigner une séance/un cycle à tout un groupe) ne
+    // proposait jamais aucun groupe pour un vrai compte, alors que la
+    // fonctionnalité existe déjà côté UI (audit 23/09/2026).
+    if (rows.length) {
+      const { data: members, error: mErr } = await sb.from("club_members")
+        .select("athlete_id, group_id, clubs!inner(owner_id)")
+        .eq("clubs.owner_id", this.user.id)
+        .not("athlete_id", "is", null);
+      if (mErr) console.warn("[PF] lecture club_members (groupes) échouée :", mErr.message);
+      const groupByAthlete = new Map((members ?? []).map((m) => [m.athlete_id, m.group_id]));
+      for (const r of rows) r.group_id = groupByAthlete.get(r.athlete_id) ?? null;
+    }
+    return rows;
   },
   async linkAthlete(athleteId) {
     const { data, error } = await sb.from("coach_athlete")
@@ -508,6 +587,23 @@ export const PF = {
   // Athlète connecté : accepte via le token (?invite=... dans l'URL).
   async acceptInvite(token) {
     return await this._invoke("accept-invite", { token });
+  },
+  // -------- INVITATIONS À REJOINDRE UN CLUB (distinct du coaching perso) --------
+  // Gérant du club : invite un nouveau membre par email (contact@sillance.app).
+  async inviteClubMember(clubId, email) {
+    return await this._invoke("invite-club-member", { club_id: clubId, email });
+  },
+  // Athlète connecté : rejoint le club via le token (?club_invite=... dans l'URL).
+  async acceptClubInvite(token) {
+    return await this._invoke("accept-club-invite", { token });
+  },
+  pendingClubInviteToken() {
+    return new URLSearchParams(location.search).get("club_invite");
+  },
+  // ?join=<token> : lien stable du club (widget "Adhérents"), distinct de
+  // ?club_invite= (à usage unique, par email).
+  pendingJoinToken() {
+    return new URLSearchParams(location.search).get("join");
   },
   // Coach : se rattache lui-même comme son propre athlète (self-coaching),
   // compte dans son propre quota d'athlètes (palier de prix).
@@ -587,6 +683,45 @@ export const PF = {
       .insert({ name, owner_id: this.user.id }).select().single();
     if (error) throw error; return data;
   },
+
+  // -------- LIEN D'INVITATION DU CLUB (stable, partagé une fois à tous les
+  // athlètes) + demandes d'adhésion reçues via ce lien --------
+  // Lecture publique minimale (nom du club) par token, pour la page
+  // d'atterrissage — fonctionne même déconnecté (RPC security definer).
+  async getClubByJoinToken(token) {
+    const { data, error } = await sb.rpc("club_by_join_token", { p_token: token });
+    if (error) { console.warn("[PF] club_by_join_token :", error.message); return null; }
+    return data?.[0] ?? null;
+  },
+  // Athlète connecté : envoie une demande d'adhésion pour ce club.
+  async requestToJoinClub(clubId, disc, message) {
+    const { data, error } = await sb.from("club_join_requests")
+      .upsert(
+        { club_id: clubId, athlete_id: this.user.id, disc: disc || null, message: message || null, status: "pending" },
+        { onConflict: "club_id,athlete_id" },
+      ).select().single();
+    if (error) throw error; return data;
+  },
+  // Gérant du club : liste ses demandes en attente (avec le profil du demandeur).
+  async myClubJoinRequests(clubId) {
+    const { data, error } = await sb.from("club_join_requests")
+      .select("id, athlete_id, disc, message, created_at, profiles:athlete_id(full_name, email)")
+      .eq("club_id", clubId).eq("status", "pending").order("created_at");
+    if (error) { console.warn("[PF] lecture club_join_requests échouée :", error.message); return []; }
+    return data ?? [];
+  },
+  // Gérant du club : accepte (crée le membre, affecté au groupe choisi) ou refuse.
+  async resolveJoinRequest(requestId, { accept, clubId, athleteId, groupId }) {
+    if (accept) {
+      const { error: memErr } = await sb.from("club_members")
+        .insert({ club_id: clubId, athlete_id: athleteId, group_id: groupId || null, role: "member" });
+      if (memErr) throw memErr;
+    }
+    const { error } = await sb.from("club_join_requests")
+      .update({ status: accept ? "accepted" : "rejected", resolved_at: new Date().toISOString() })
+      .eq("id", requestId);
+    if (error) throw error;
+  },
   async getClubMembers(clubId) {
     // profiles(full_name,email) : un membre rejoint via accept-club-invite n'a
     // pas toujours de display_name posé (fix 0057/accept-club-invite côté
@@ -603,6 +738,31 @@ export const PF = {
     const { data, error } = await sb.from("creneaux").select("*").eq("club_id", clubId).order("day");
     if (error) console.warn("[PF] lecture creneaux échouée :", error.message);
     return data ?? [];
+  },
+  // Présences de TOUS les créneaux du club en un appel (jointure via creneaux
+  // pour filtrer par club_id, creneau_attendees n'a pas cette colonne).
+  async getClubAttendance(clubId) {
+    const { data, error } = await sb.from("creneau_attendees")
+      .select("creneau_id, athlete_id, creneaux!inner(club_id)")
+      .eq("creneaux.club_id", clubId);
+    if (error) console.warn("[PF] lecture creneau_attendees échouée :", error.message);
+    return data ?? [];
+  },
+  // Pointage manuel par le gérant du club (RLS : "attendees: club owner all"
+  // — le membre lui-même n'a pas encore de policy d'écriture ici, cf. audit
+  // 22/09/2026 : le pointage n'était jusque-là jamais persisté, CRENEAUX
+  // arrivait toujours avec attendees:[] côté hydrate).
+  async setPresence(creneauId, memberId, present) {
+    if (present) {
+      const { error } = await sb.from("creneau_attendees")
+        .upsert({ creneau_id: creneauId, athlete_id: memberId }, { onConflict: "creneau_id,athlete_id" });
+      if (error) throw error;
+    } else {
+      const { error } = await sb.from("creneau_attendees")
+        .delete().eq("creneau_id", creneauId).eq("athlete_id", memberId);
+      if (error) throw error;
+    }
+    return true;
   },
   // -------- CLUB : groupes & affectation des membres --------
   async getGroups(clubId) {
@@ -638,6 +798,54 @@ export const PF = {
       creneau_id: creneauId, member_id: memberId,
     });
     window.location.href = url;
+  },
+  // Auto-inscription/désinscription d'un adhérent à un créneau (RLS 0058 :
+  // "attendees: member self manages own", scopée à SA propre ligne
+  // club_members — avant ce fix le bouton "s'inscrire" ne touchait qu'un
+  // tableau JS local, jamais la base, pour tout compte réel).
+  async joinCreneau(creneauId, memberId) {
+    const { error } = await sb.from("creneau_attendees")
+      .upsert({ creneau_id: creneauId, athlete_id: memberId }, { onConflict: "creneau_id,athlete_id" });
+    if (error) throw error; return true;
+  },
+  async leaveCreneau(creneauId, memberId) {
+    const { error } = await sb.from("creneau_attendees")
+      .delete().eq("creneau_id", creneauId).eq("athlete_id", memberId);
+    if (error) throw error; return true;
+  },
+  // Séance-type attachée à un créneau (0058) : posée une fois par le coach
+  // (bouton "Créer une séance pour ce créneau"), copiée sur le calendrier de
+  // chaque athlète qui s'inscrit ensuite (scheduleSessionFromCreneau).
+  async setCreneauSessionTemplate(creneauId, template) {
+    const { error } = await sb.from("creneaux")
+      .update({ session_template: template }).eq("id", creneauId);
+    if (error) throw error; return true;
+  },
+  // -------- CLUB : compétitions (objectifs par groupe) --------
+  async getClubCompetitions(clubId) {
+    const { data, error } = await sb.from("club_competitions").select("*").eq("club_id", clubId).order("date");
+    if (error) console.warn("[PF] lecture club_competitions échouée :", error.message);
+    return data ?? [];
+  },
+  async saveClubCompetition({ id, club_id, name, date, level, target_group_id }) {
+    const row = { club_id, name, date, level, target_group_id };
+    if (id) row.id = id;
+    const { data, error } = await sb.from("club_competitions").upsert(row).select().single();
+    if (error) throw error; return data;
+  },
+  async getClubCompetitionResponses(competitionIds) {
+    if (!competitionIds.length) return [];
+    const { data, error } = await sb.from("club_competition_responses")
+      .select("*").in("competition_id", competitionIds);
+    if (error) console.warn("[PF] lecture club_competition_responses échouée :", error.message);
+    return data ?? [];
+  },
+  // L'athlète répond pour lui-même (RLS : athlete_id = auth.uid()).
+  async respondToClubCompetition(competitionId, status) {
+    const { error } = await sb.from("club_competition_responses")
+      .upsert({ competition_id: competitionId, athlete_id: this.user.id, status },
+        { onConflict: "competition_id,athlete_id" });
+    if (error) throw error; return true;
   },
 
   // -------- CLUB : les 3 formules & encaissement (Stripe) --------
@@ -708,12 +916,28 @@ export const PF = {
     const { data } = await q;
     return data ?? [];
   },
+  // Ressenti (RPE 1-10 effort + sensation 1-5 bien-être, distincts façon
+  // Nolio/iDO + note libre) + matériel utilisé pour une activité synchronisée
+  // — flux bloquant à la connexion (cf. sillance-integration.js
+  // queueFeelingPrompts). patch = { rpe, mood?, note?, gearId? }.
+  async logActivityFeeling(activityId, patch) {
+    const { error } = await sb.from("external_activities").update({
+      rpe: patch.rpe, feeling_mood: patch.mood ?? null,
+      feeling_note: patch.note ?? null, gear_id: patch.gearId ?? null,
+      feeling_logged_at: new Date().toISOString(),
+    }).eq("id", activityId).eq("user_id", this.user.id);
+    if (error) console.warn("logActivityFeeling:", error.message);
+    return !error;
+  },
   // Détail seconde-par-seconde d'une activité Strava (GPS/FC/allure/puissance),
   // récupéré à la demande et mis en cache côté serveur. Renvoie la même forme
   // que window.PFFit (points bruts) pour rejouer le modal d'analyse.
+  // { points, laps } — laps = vrais laps de la montre au format {start,end}
+  // (indices dans points), [] si l'activité n'en a aucun (découpage auto au
+  // km côté front dans ce cas).
   async getActivityStreams(activityId) {
     const data = await this._invoke("strava-activity-streams", { activity_id: activityId });
-    return data?.points ?? [];
+    return { points: data?.points ?? [], laps: data?.laps ?? [] };
   },
   // Persiste un import manuel .TCX/.GPX (window.PFFit.parseFile → { summary, data }).
   // Upsert sur (provider, provider_activity_id) : ré-importer le même fichier ne duplique pas.

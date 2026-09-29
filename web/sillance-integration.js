@@ -13,7 +13,7 @@
  *   - window.PF        (exposé par sillance-client.js)
  *   - window.__pf_app  (hook exposé par le <script> inline de l'app)
  * ========================================================================== */
-import { PF } from "./sillance-client.js";
+import { PF } from "./sillance-client.js?v=20260928c";
 window.PF = PF;
 
 function tr(key, vars) { return window.SilI18n ? window.SilI18n.t(key, vars) : key; }
@@ -94,15 +94,29 @@ const mapSession = (s) => ({ id: s.id, disc: s.disc, title: esc(s.title), dur: s
 // display_name (membre sans compte) prioritaire, sinon le nom réel du profil
 // lié (join profiles dans getClubMembers) — avant ce fix un membre inscrit
 // via accept-club-invite retombait toujours sur le placeholder "Athlète".
-const mapMember  = (m) => ({ id: m.id, name: esc(m.display_name) || esc(m.profiles?.full_name) || "Athlète",
+// athleteUid (m.athlete_id = profiles.id, PEUT être null pour un membre sans
+// compte) distinct de id (m.id = la ligne club_members) : plusieurs tables
+// (scheduled_sessions, club_competition_responses) sont keyées sur le vrai
+// profil utilisateur, pas sur l'adhésion — calendrier club (0058) en a besoin
+// pour ouvrir/écrire le calendrier réel de l'adhérent.
+const mapMember  = (m) => ({ id: m.id, athleteUid: m.athlete_id || null,
+  name: esc(m.display_name) || esc(m.profiles?.full_name) || "Athlète",
   email: esc(m.profiles?.email) || "", disc: m.disc || "tri", since: esc(m.since) || "", group: m.group_id });
 const mapGroup   = (g) => ({ id: g.id, name: esc(g.name), color: g.color, desc: esc(g.description) });
+// recur/date/description existent en base depuis 0017/0018 mais n'étaient
+// jamais mappés ici (audit 29/09/2026) : tout créneau réel s'affichait donc
+// comme hebdomadaire, jamais comme ponctuel daté, et sa description restait
+// invisible — corrigé au passage, nécessaire pour placer correctement les
+// créneaux sur le calendrier club (0058).
 const mapCreneau = (c) => ({ id: c.id, disc: c.disc, title: esc(c.title), day: c.day,
   time: c.time, dur: c.dur, place: esc(c.place), cap: c.cap, coach: esc(c.coach),
-  price: Number(c.price) || 0, group: c.group_id, attendees: [] });
+  price: Number(c.price) || 0, group: c.group_id, attendees: [],
+  recur: c.recur || 'weekly', date: c.date || null, desc: esc(c.description) || '',
+  sessionTemplate: c.session_template || null });
 const mapGear = (g) => ({ id: g.id, type: g.type, name: esc(g.name), brand: esc(g.brand) || "",
   km: Number(g.km) || 0, max: Number(g.max_km) || 1000,
-  cat: g.cat || null, price: g.price != null ? Number(g.price) : null,
+  cat: g.cat || null, sessionTypes: g.session_types || [],
+  price: g.price != null ? Number(g.price) : null,
   notified: g.notified || [] });
 // Activité réalisée (external_activities) → forme attendue par realisedCard()
 // dans le core (et compatible openStravaAnalysis : {id, disc, name, dur}).
@@ -200,6 +214,7 @@ async function hydrate() {
       name: esc(r.profiles?.full_name || r.profiles?.email) || tr("mode.athlete"),
       checkin: ckByAth[r.athlete_id] || null,
       refsUpdatedAt: refsByAth[r.athlete_id] || null,
+      group: r.group_id || null,
     }));
     // Un coach avec des athlètes liés planifie par défaut pour le premier
     // (plus utile que "pour soi-même" dans le cas d'usage réel).
@@ -216,6 +231,14 @@ async function hydrate() {
   // pouvait cliquer librement sur les 3 portes — pensées pour la démo/preview
   // publique, pas pour un compte connecté. Doit tourner APRÈS "coachAthletes"
   // puisque __pf_lockModes lit window.__pf_selfCoached calculé ci-dessus.
+  // Club : un coach qui possède aussi un club (clubs.owner_id) cumule les deux
+  // vues, comme l'auto-coaching débloque Athlète ci-dessus (ex. Quentin Salmon,
+  // 22/09/2026 : coach de ses athlètes + gérant de son club). Doit être connu
+  // AVANT __pf_lockModes puisque celle-ci lit window.__pf_ownsClub.
+  if (PF.profile?.role === "coach") {
+    try { window.__pf_ownsClub = (await PF.myClubs()).length > 0; }
+    catch (e) { console.warn("[PF] myClubs (lockModes) :", e); }
+  }
   if (typeof window.__pf_lockModes === "function" && PF.profile?.role) {
     const realMode = PF.profile.role === "club_admin" ? "club" : PF.profile.role;
     window.__pf_lockModes(realMode);
@@ -285,6 +308,28 @@ async function hydrate() {
       await loadPlanningFor(defaultAthleteId);
     }),
 
+    // Prochaine course réelle (calendrier de saison, migration 0049) — sans ça,
+    // currentRace() retombait sur la course de démo codée en dur (« Gorillaman
+    // J-22 ») pour TOUT compte réel n'ayant pas encore de course renseignée,
+    // affûtage inclus. Précharge la sienne (athlète) + celle de l'athlète par
+    // défaut du coach, pour que le bandeau soit juste dès l'ouverture.
+    section("races", async () => {
+      const mapRaceRow = (row) => {
+        const days = Math.round((new Date(row.race_date + "T00:00:00") - new Date(new Date().toDateString())) / 86400000);
+        return { id: row.id, name: row.name, location: row.location, days, priority: row.priority, type: row.type, result: row.result, recap: row.recap || null };
+      };
+      try {
+        window.__pf_selfRaces = (await PF.getRaces()).map(mapRaceRow);
+      } catch (e) { console.warn("[PF] getRaces (self) :", e); }
+      if (PF.profile?.role === "coach" && defaultAthleteId && defaultAthleteId !== uid && Array.isArray(window.ROSTER)) {
+        try {
+          const rows = await PF.getRaces(defaultAthleteId);
+          const entry = window.ROSTER.find((r) => r.id === defaultAthleteId);
+          if (entry) entry.races = rows.map(mapRaceRow);
+        } catch (e) { console.warn("[PF] getRaces (default athlete) :", e); }
+      }
+    }),
+
     section("videos", async () => {
       const vids = await PF.getVideos();
       if (vids.length) app.replaceArray(app.data.VIDEOS, vids.map(mapVideo));
@@ -304,14 +349,40 @@ async function hydrate() {
       }
       const club = clubs[0];
       window.__pf_clubId = club.id;   // exposé pour les écritures (création créneau)
-      const [members, creneaux] = await Promise.all([
+      const [members, creneaux, attendance, competitions] = await Promise.all([
         PF.getClubMembers(club.id),
         PF.getCreneaux(club.id),
+        PF.getClubAttendance(club.id),
+        PF.getClubCompetitions(club.id),
       ]);
       app.replaceArray(app.data.CLUB_ATHLETES, members.map(mapMember));
       const groups = await PF.sb.from("club_groups").select("*").eq("club_id", club.id);
       if (groups.data) app.replaceArray(app.data.CLUB_GROUPS, groups.data.map(mapGroup));
-      app.replaceArray(app.data.CRENEAUX, creneaux.map(mapCreneau));
+      // Compétitions club (0058, réelles depuis ce jour — COMPETITIONS était
+      // jusque-là 100% démo, jamais persisté) + réponses par athlète.
+      const compRows = competitions.map(c => ({ id: c.id, name: c.name, date: c.date, level: c.level, targetGroupId: c.target_group_id }));
+      app.replaceArray(app.data.COMPETITIONS, compRows);
+      // club_competition_responses.athlete_id = profiles.id, mais le reste du
+      // front (COMPETITION_RESPONSES, competitionTargets) key tout sur
+      // CLUB_ATHLETES[].id = club_members.id — table de correspondance via
+      // athleteUid (posé par mapMember) pour retomber sur les mêmes clés.
+      const responses = await PF.getClubCompetitionResponses(compRows.map(c => c.id));
+      const memberIdByUid = {};
+      app.data.CLUB_ATHLETES.forEach(a => { if (a.athleteUid) memberIdByUid[a.athleteUid] = a.id; });
+      // "Moi" dans CLUB_ATHLETES (auto-inscription créneau, ME_CLUB_ID) —
+      // sans ça tout le module join/confirm restait câblé sur le compte démo.
+      if (memberIdByUid[uid] && app.setMeClubId) app.setMeClubId(memberIdByUid[uid]);
+      const respByKey = {};
+      responses.forEach(r => {
+        const memberId = memberIdByUid[r.athlete_id];
+        if (memberId) respByKey[r.competition_id + ':' + memberId] = { status: r.status };
+      });
+      app.assignObj(app.data.COMPETITION_RESPONSES, respByKey);
+      // Présences réelles (audit 22/09/2026 : mapCreneau posait attendees:[]
+      // en dur, aucun pointage n'était donc jamais visible pour un vrai club).
+      const attByCreneau = {};
+      for (const a of attendance) (attByCreneau[a.creneau_id] ||= []).push(a.athlete_id);
+      app.replaceArray(app.data.CRENEAUX, creneaux.map((c) => ({ ...mapCreneau(c), attendees: attByCreneau[c.id] || [] })));
       // titre du club affiché
       const clubNameEl = document.getElementById("clubName");
       if (clubNameEl) clubNameEl.textContent = club.name;
@@ -365,6 +436,210 @@ async function section(name, fn) {
   catch (e) { console.error(`[PF] hydrate ${name} échoué :`, e); }
 }
 
+/* ===========================================================================
+ *  INVITE RESSENTI + MATÉRIEL — activité synchronisée (24/09/2026)
+ *  ---------------------------------------------------------------------------
+ *  Dès qu'une activité synchronisée (Strava/Coros/…) n'a pas encore de
+ *  ressenti renseigné, elle est présentée à l'athlète à sa prochaine
+ *  connexion via une pop-up BLOQUANTE (choix explicite, pas une bannière) :
+ *  RPE 1-10 + note libre + matériel utilisé (chaussures/vélo, table `gear`
+ *  déjà existante — incrémente son kilométrage au passage). Ne concerne que
+ *  les activités synchronisées APRÈS la mise en place de cette fonctionnalité
+ *  (colonne feeling_required, migration 0051) — jamais l'historique déjà
+ *  synchronisé avant. Déclenchée depuis loadPlanningFor(), uniquement quand
+ *  target === PF.user.id (jamais côté coach consultant un athlète suivi).
+ * ========================================================================= */
+const DISC_MINI = {
+  run:      { color: "var(--run)",      icon: "ic-run",     gearType: "shoe" },
+  bike:     { color: "var(--bike)",     icon: "ic-bike",    gearType: "bike" },
+  swim:     { color: "var(--swim)",     icon: "ic-waves",   gearType: null },
+  strength: { color: "var(--strength)", icon: "ic-dumbbell", gearType: null },
+  hyrox:    { color: "#FF8A3D",         icon: "ic-zap",     gearType: null },
+};
+// Usages d'entraînement à choix multiple pour le matériel (migration 0053) —
+// une paire peut cocher plusieurs cases (ex. Novablast = interval + tempo).
+const SESSION_TYPES = ["easy", "interval", "tempo", "race"];
+// Repli vers l'ancienne colonne gear.cat (single, daily/tempo/race/trail) —
+// garde le badge d'usure existant sur la page Matériel cohérent pour le
+// matériel ajouté ici, priorité course > seuil/fractionné > endurance.
+function deriveLegacyCat(types) {
+  if (types.includes("race")) return "race";
+  if (types.includes("tempo") || types.includes("interval")) return "tempo";
+  if (types.includes("easy")) return "daily";
+  return null;
+}
+let feelQueue = [];        // activités (lignes brutes external_activities) restant à traiter
+let feelQueueTotal = 0;    // taille initiale de la file, pour l'indicateur "n sur total"
+let feelGear = [];         // matériel de l'athlète (mappé), pour filtrer par discipline
+let feelQueueActive = false;
+
+function injectFeelOverlay() {
+  if (document.getElementById("pf-feel-overlay")) return;
+  const ov = document.createElement("div");
+  ov.id = "pf-feel-overlay";
+  ov.innerHTML = `<div class="pf-feel-card"></div>`;
+  document.body.appendChild(ov);
+  // Volontairement AUCUN handler de clic hors-carte ni d'Échap : bloquant.
+}
+function fmtActDate(iso) {
+  if (!iso) return "";
+  try { return new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short" }); }
+  catch (e) { return ""; }
+}
+function fmtActDur(durationS) {
+  if (!durationS) return "";
+  const m = Math.round(durationS / 60);
+  return m >= 60 ? `${Math.floor(m / 60)}h${String(m % 60).padStart(2, "0")}` : `${m} min`;
+}
+// Vert (facile) → rouge (maximal) — même esprit que rpeColor() côté core.js,
+// dupliqué ici car sillance-integration.js n'a pas accès aux closures du core.
+function feelRpeColor(n) {
+  const hues = [140, 120, 95, 75, 55, 40, 25, 12, 2, 350];
+  return `hsl(${hues[Math.max(0, Math.min(9, n - 1))]},70%,52%)`;
+}
+// Smiley "sensation" (bien-être, 1 mauvaise → 5 excellente) — SVG inline
+// (jamais d'emoji brut dans l'app, cf. convention design) : même visage
+// (cercle + 2 yeux), seule la courbe de bouche change. Corners fixes en
+// (7,15)/(17,15), point de contrôle qui monte (fronce) ou descend (sourit).
+const MOOD_COLORS = ["#FF5470", "#FFB13D", "#8a949e", "#A8E063", "#39E6A3"];
+const MOOD_CTRL_Y = [9, 11.5, 15, 18.5, 20.5];
+function moodFaceSvg(level) {
+  const cy = MOOD_CTRL_Y[level - 1];
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+    <circle cx="12" cy="12" r="10"/>
+    <circle cx="8.2" cy="10" r="1.1" fill="currentColor" stroke="none"/>
+    <circle cx="15.8" cy="10" r="1.1" fill="currentColor" stroke="none"/>
+    <path d="M7,15 Q12,${cy} 17,15"/>
+  </svg>`;
+}
+function renderFeelingPrompt() {
+  const item = feelQueue[0];
+  if (!item) { closeFeelingOverlay(); return; }
+  injectFeelOverlay();
+  const card = document.querySelector("#pf-feel-overlay .pf-feel-card");
+  const D = DISC_MINI[item.disc] || DISC_MINI.run;
+  let gearList = D.gearType ? feelGear.filter((g) => g.type === D.gearType) : [];
+  // gearId toujours facultatif (24/09/2026, bug remonté par Rowan : quand
+  // l'athlète a déjà du matériel enregistré, une sélection EXPLICITE était
+  // exigée pour débloquer Valider, sans aucune indication visuelle du
+  // pourquoi — RPE + sensation cochés mais bouton figé, lu comme "rien ne
+  // marche"). Ne bloque plus jamais checkReady().
+  let rpe = null, mood = null, gearId = null;
+  const total = feelQueueTotal;
+  const pos = total - feelQueue.length + 1;
+  card.style.setProperty("--c", D.color);
+  card.innerHTML = `
+    ${total > 1 ? `<div class="pf-feel-progress">${tr("feel.progress", { n: pos, total })}</div>` : ""}
+    <span class="pf-feel-disc"><i class="ic ${D.icon}"></i> ${tr("disc." + item.disc) || item.disc}</span>
+    <h2>${esc(item.name) || tr("sync.activity")}</h2>
+    <p class="pf-feel-meta">${fmtActDate(item.start_time)} · ${fmtActDur(item.duration_s)}${item.distance_m ? ` · ${(item.distance_m / 1000).toFixed(1)} km` : ""}</p>
+    <div class="pf-feel-lbl"><i class="ic ic-zap"></i> ${tr("feel.rpeLabel")}</div>
+    <div class="pf-feel-rpe-grid" id="feelRpe">${Array.from({ length: 10 }, (_, i) => `<button data-r="${i + 1}" style="--rc:${feelRpeColor(i + 1)}">${i + 1}</button>`).join("")}</div>
+    <div class="pf-feel-scale"><span>${tr("rpe.veryEasy")}</span><span>${tr("rpe.allOut")}</span></div>
+    <div class="pf-feel-lbl"><i class="ic ic-star"></i> ${tr("feel.moodLabel")}</div>
+    <div class="pf-feel-mood-grid" id="feelMood">${[1, 2, 3, 4, 5].map((n) => `<button data-m="${n}" style="--mc:${MOOD_COLORS[n - 1]}" aria-label="${n}/5">${moodFaceSvg(n)}</button>`).join("")}</div>
+    <div class="pf-feel-scale"><span>${tr("feel.moodLow")}</span><span>${tr("feel.moodHigh")}</span></div>
+    <textarea class="pf-feel-note" placeholder="${tr("feel.notePlaceholder")}"></textarea>
+    ${D.gearType ? `<div class="pf-feel-lbl"><i class="ic ic-shoe"></i> ${tr("feel.gearLabel")}</div><div id="feelGearWrap"></div>` : ""}
+    <button class="pf-feel-save" id="feelSave" disabled>${tr("feel.validate")} <i class="ic ic-check"></i></button>
+    <button class="pf-feel-skip" id="feelSkip">${tr("feel.skip")}</button>`;
+  const save = card.querySelector("#feelSave");
+  const checkReady = () => { save.disabled = !(rpe && mood); };
+  card.querySelector("#feelSkip").onclick = () => { feelQueue.shift(); renderFeelingPrompt(); };
+  card.querySelectorAll("#feelRpe button").forEach((b) => {
+    b.onclick = () => {
+      card.querySelectorAll("#feelRpe button").forEach((x) => x.classList.remove("sel"));
+      b.classList.add("sel"); rpe = +b.dataset.r; checkReady();
+    };
+  });
+  card.querySelectorAll("#feelMood button").forEach((b) => {
+    b.onclick = () => {
+      card.querySelectorAll("#feelMood button").forEach((x) => x.classList.remove("sel"));
+      b.classList.add("sel"); mood = +b.dataset.m; checkReady();
+    };
+  });
+  // Section matériel : liste enregistrée (filtrée par type shoe/bike) + un
+  // bouton "+ Ajouter une paire" qui déplie un mini-formulaire (nom + catégorie
+  // pour les chaussures) — persisté dans la vraie table `gear`, donc réutilisé
+  // immédiatement par recommendShoe() (déjà existant) pour les recommandations
+  // automatiques par type de séance (24/09/2026, demande Rowan).
+  function renderGearWrap() {
+    const wrap = card.querySelector("#feelGearWrap");
+    if (!wrap) return;
+    wrap.innerHTML = `
+      <div class="pf-feel-gear-grid" id="feelGear">
+        ${gearList.map((g) => `<button data-g="${g.id}" class="${g.id === gearId ? "sel" : ""}">${g.name}<small>${g.km} km</small></button>`).join("")}
+        <button id="feelGearAddBtn" class="pf-feel-gear-add">+ ${tr("feel.addGear")}</button>
+      </div>
+      ${!gearList.length ? `<p class="pf-feel-hint">${tr(D.gearType === "shoe" ? "feel.noShoes" : "feel.noBike")}</p>` : ""}
+      <div class="pf-feel-gear-form" id="feelGearForm" hidden>
+        <input type="text" id="feelGearName" placeholder="${D.gearType === "shoe" ? tr("feel.gearNamePh") : tr("feel.bikeNamePh")}">
+        ${D.gearType === "shoe" ? `
+          <p class="pf-feel-gear-types-hint">${tr("feel.gearTypesHint")}</p>
+          <div class="pf-feel-gear-types" id="feelGearTypes">${SESSION_TYPES.map((t) => `<button type="button" data-t="${t}">${tr("sessionType." + t)}</button>`).join("")}</div>
+        ` : ""}
+        <button type="button" id="feelGearSave">${tr("feel.addGearSave")}</button>
+      </div>`;
+    wrap.querySelectorAll("#feelGear button[data-g]").forEach((b) => {
+      b.onclick = () => {
+        wrap.querySelectorAll("#feelGear button[data-g]").forEach((x) => x.classList.remove("sel"));
+        b.classList.add("sel"); gearId = b.dataset.g; checkReady();
+      };
+    });
+    const form = wrap.querySelector("#feelGearForm");
+    wrap.querySelector("#feelGearAddBtn").onclick = () => { form.hidden = !form.hidden; if (!form.hidden) wrap.querySelector("#feelGearName")?.focus(); };
+    wrap.querySelectorAll("#feelGearTypes button").forEach((b) => { b.onclick = () => b.classList.toggle("sel"); });
+    wrap.querySelector("#feelGearSave").onclick = async () => {
+      const name = wrap.querySelector("#feelGearName").value.trim();
+      if (!name) return;
+      const sessionTypes = [...wrap.querySelectorAll("#feelGearTypes button.sel")].map((b) => b.dataset.t);
+      const cat = deriveLegacyCat(sessionTypes);
+      const btn = wrap.querySelector("#feelGearSave");
+      btn.disabled = true; btn.textContent = "…";
+      const row = await PF.addGear({ type: D.gearType, name, cat, sessionTypes }).catch((e) => { console.warn("[PF] addGear :", e); return null; });
+      btn.disabled = false; btn.textContent = tr("feel.addGearSave");
+      if (!row) return;
+      const g = { id: row.id, type: row.type, name: row.name, km: Number(row.km) || 0, cat: row.cat || null, sessionTypes: row.session_types || [] };
+      feelGear.push(g); gearList.push(g); gearId = g.id;
+      renderGearWrap();
+      checkReady();
+    };
+  }
+  renderGearWrap();
+  checkReady();
+  save.onclick = async () => {
+    if (!rpe || !mood) return;
+    save.disabled = true; save.textContent = "…";
+    const note = card.querySelector(".pf-feel-note").value.trim();
+    const chosenGearId = gearId || null;
+    await PF.logActivityFeeling(item.id, { rpe, mood, note: note || null, gearId: chosenGearId })
+      .catch((e) => console.warn("[PF] logActivityFeeling :", e));
+    if (chosenGearId && item.distance_m) {
+      const g = feelGear.find((x) => x.id === chosenGearId);
+      if (g) PF.updateGear(g.id, { km: Math.round((g.km + item.distance_m / 1000) * 10) / 10 })
+        .catch((e) => console.warn("[PF] updateGear :", e));
+    }
+    feelQueue.shift();
+    renderFeelingPrompt();
+  };
+}
+function closeFeelingOverlay() {
+  document.getElementById("pf-feel-overlay")?.classList.remove("open");
+  document.body.style.overflow = "";
+  feelQueueActive = false;
+}
+function queueFeelingPrompts(pendingRaw, gearMapped) {
+  if (feelQueueActive || !pendingRaw.length) return; // déjà en cours (ex. re-render pendant la saisie)
+  feelQueue = pendingRaw.slice().sort((a, b) => new Date(a.start_time) - new Date(b.start_time));
+  feelQueueTotal = feelQueue.length;
+  feelGear = gearMapped;
+  feelQueueActive = true;
+  injectFeelOverlay();
+  document.getElementById("pf-feel-overlay").classList.add("open");
+  document.body.style.overflow = "hidden";
+  renderFeelingPrompt();
+}
+
 // (Re)charge le planning ET le matériel d'un athlète donné (null = soi-même),
 // puis re-render. Utilisé au chargement ET quand le coach change d'athlète.
 async function loadPlanningFor(athleteId) {
@@ -400,6 +675,13 @@ async function loadPlanningFor(athleteId) {
   app.setAthleteZones?.(target, zones || null);
   app.render?.();
   app.renderSidebar?.();
+  // Invite ressenti + matériel — uniquement quand on regarde SES PROPRES
+  // activités (jamais côté coach en train de consulter un athlète suivi :
+  // target vaudrait alors l'id de cet athlète, pas PF.user.id).
+  if (target === PF.user.id) {
+    const pending = acts.filter((a) => a.feeling_required && !a.feeling_logged_at);
+    if (pending.length) queueFeelingPrompts(pending, gearRows.map(mapGear));
+  }
 }
 window.__pf_loadPlanningFor = (athleteId) => {
   loadPlanningFor(athleteId).catch((e) => console.error("[PF] loadPlanningFor échoué :", e));
@@ -449,7 +731,74 @@ function injectStyles() {
   .dp-lbl{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#8a949e;margin-right:2px}
   .dp-chip{padding:5px 10px;border:1px solid #2a2f37;border-radius:99px;background:#0c0f13;
     color:#cfd6de;font-size:12px;font-weight:600;cursor:pointer}
-  .dp-chip.on{border-color:#46C2D8;color:#46C2D8;background:rgba(70,194,216,.10)}`;
+  .dp-chip.on{border-color:#46C2D8;color:#46C2D8;background:rgba(70,194,216,.10)}
+  /* Invite ressenti + matériel — activité synchronisée non encore complétée
+     (24/09/2026). Bloquante par choix explicite : pas de croix, pas de clic
+     en dehors, pas d'Échap — voir openFeelingPrompt/closeFeelingOverlay. */
+  #pf-feel-overlay{position:fixed;inset:0;z-index:9999;background:rgba(8,10,13,.82);
+    display:none;align-items:center;justify-content:center;backdrop-filter:blur(4px);padding:20px;overflow-y:auto}
+  #pf-feel-overlay.open{display:flex}
+  .pf-feel-card{width:420px;max-width:100%;background:#11151a;border:1px solid #262c34;border-radius:16px;
+    padding:26px 24px;color:#e7edf3;font-family:system-ui,sans-serif;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+  .pf-feel-progress{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:#8a949e;margin-bottom:8px}
+  .pf-feel-disc{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:700;letter-spacing:.08em;
+    text-transform:uppercase;padding:4px 10px;border-radius:99px;color:var(--c);background:color-mix(in srgb,var(--c) 16%,transparent)}
+  .pf-feel-card h2{margin:10px 0 2px;font:700 20px/1.2 'Oswald',system-ui;letter-spacing:.3px}
+  .pf-feel-meta{margin:0 0 16px;color:#8a949e;font-size:12.5px}
+  .pf-feel-lbl{font-size:12px;font-weight:700;color:#cfd6de;margin:16px 0 8px;display:flex;align-items:center;gap:6px}
+  .pf-feel-rpe-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
+  .pf-feel-rpe-grid button{padding:10px 0;border-radius:9px;border:1px solid #2a2f37;background:#0c0f13;
+    color:#cfd6de;font:700 14px/1 var(--font-data,system-ui);cursor:pointer;transition:border-color .15s,background .15s}
+  .pf-feel-rpe-grid button.sel{border-color:var(--rc);background:color-mix(in srgb,var(--rc) 22%,#0c0f13);color:#fff}
+  .pf-feel-scale{display:flex;justify-content:space-between;margin-top:5px;font-size:10.5px;color:#6b7480}
+  .pf-feel-note{width:100%;box-sizing:border-box;margin-top:14px;background:#0c0f13;border:1px solid #2a2f37;
+    color:#e7edf3;border-radius:9px;padding:10px 11px;font-size:13px;font-family:inherit;resize:vertical;min-height:56px}
+  .pf-feel-gear-grid{display:flex;flex-wrap:wrap;gap:8px}
+  .pf-feel-gear-grid button{padding:9px 13px;border-radius:9px;border:1px solid #2a2f37;background:#0c0f13;
+    color:#cfd6de;font-size:12.5px;font-weight:600;cursor:pointer;display:flex;flex-direction:column;align-items:flex-start;gap:2px}
+  .pf-feel-gear-grid button small{color:#6b7480;font-weight:500;font-size:10.5px}
+  .pf-feel-gear-grid button.sel{border-color:#46C2D8;color:#46C2D8;background:rgba(70,194,216,.10)}
+  .pf-feel-gear-grid button.sel small{color:#46C2D8}
+  .pf-feel-hint{margin:0;font-size:12px;color:#8a949e;line-height:1.5}
+  .pf-feel-save{width:100%;margin-top:20px;background:#46C2D8;color:#06222a;border:0;
+    border-radius:10px;padding:12px;font:700 14px/1 system-ui;cursor:pointer;transition:opacity .15s}
+  .pf-feel-save:disabled{opacity:.5;cursor:not-allowed}
+  /* "Plus tard" (24/09/2026, demandé par Rowan) : passe à l'activité
+     suivante sans enregistrer — celle-ci redemandée à la prochaine
+     connexion (feeling_logged_at reste NULL). Discret, sous Valider. */
+  .pf-feel-skip{width:100%;margin-top:8px;background:transparent;color:#6b7480;border:0;
+    padding:8px;font-size:12px;font-weight:600;cursor:pointer;text-decoration:underline;text-underline-offset:2px}
+  .pf-feel-skip:hover{color:#8a949e}
+  /* "Sensation" (bien-être, distinct du RPE) — smileys façon Nolio/iDO,
+     recherché le 24/09/2026 : Nolio sépare explicitement RPE (effort,
+     objectif, alimente la charge) et sensation (bien-être, subjectif,
+     smileys, hors calcul de charge). */
+  .pf-feel-mood-grid{display:flex;justify-content:space-between;gap:6px}
+  .pf-feel-mood-grid button{flex:1;padding:8px 0;border-radius:9px;border:1px solid #2a2f37;background:#0c0f13;
+    color:#6b7480;cursor:pointer;transition:border-color .15s,background .15s,color .15s;display:flex;align-items:center;justify-content:center}
+  .pf-feel-mood-grid button svg{width:26px;height:26px}
+  .pf-feel-mood-grid button.sel{border-color:var(--mc);background:color-mix(in srgb,var(--mc) 18%,#0c0f13);color:var(--mc)}
+  /* Ajout de matériel inline (24/09/2026) — "+ Ajouter une paire" déplie un
+     mini-formulaire nom + catégorie, persisté dans la vraie table gear. */
+  .pf-feel-gear-grid button[data-g]{padding:9px 13px;border-radius:9px;border:1px solid #2a2f37;background:#0c0f13;
+    color:#cfd6de;font-size:12.5px;font-weight:600;cursor:pointer;display:flex;flex-direction:column;align-items:flex-start;gap:2px}
+  .pf-feel-gear-grid button[data-g] small{color:#6b7480;font-weight:500;font-size:10.5px}
+  .pf-feel-gear-grid button[data-g].sel{border-color:#46C2D8;color:#46C2D8;background:rgba(70,194,216,.10)}
+  .pf-feel-gear-grid button[data-g].sel small{color:#46C2D8}
+  .pf-feel-gear-add{padding:9px 13px;border-radius:9px;border:1px dashed #2a2f37;background:transparent;
+    color:#8a949e;font-size:12.5px;font-weight:600;cursor:pointer}
+  .pf-feel-gear-add:hover{border-color:#46C2D8;color:#46C2D8}
+  .pf-feel-gear-form{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+  .pf-feel-gear-form[hidden]{display:none}
+  .pf-feel-gear-form input{background:#0c0f13;border:1px solid #2a2f37;color:#e7edf3;
+    border-radius:9px;padding:8px 10px;font-size:12.5px;font-family:inherit}
+  .pf-feel-gear-types-hint{margin:2px 0 0;font-size:11px;color:#8a949e}
+  .pf-feel-gear-types{display:flex;flex-wrap:wrap;gap:6px}
+  .pf-feel-gear-types button{padding:6px 11px;border-radius:99px;border:1px solid #2a2f37;background:#0c0f13;
+    color:#8a949e;font-size:11.5px;font-weight:600;cursor:pointer;transition:border-color .15s,color .15s,background .15s}
+  .pf-feel-gear-types button.sel{border-color:#46C2D8;color:#46C2D8;background:rgba(70,194,216,.10)}
+  .pf-feel-gear-form>#feelGearSave{align-self:flex-start;padding:8px 14px;border-radius:9px;border:0;
+    background:#46C2D8;color:#06222a;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap}`;
   const st = document.createElement("style");
   st.id = "pf-auth-style"; st.textContent = css;
   document.head.appendChild(st);
@@ -711,6 +1060,18 @@ async function onLoggedIn() {
   // Accepte une éventuelle invitation présente dans l'URL (?invite=...).
   const tok = PF.pendingInviteToken?.();
   if (tok) { try { await PF.acceptInvite(tok); } catch (e) { console.warn("[PF] invite:", e); } }
+  // Idem pour une invitation à rejoindre un CLUB (?club_invite=...).
+  const clubTok = PF.pendingClubInviteToken?.();
+  if (clubTok) { try { await PF.acceptClubInvite(clubTok); } catch (e) { console.warn("[PF] club invite:", e); } }
+  // Lien stable du club, widget "Adhérents" (?join=...) : envoie une demande
+  // d'adhésion — le gérant l'accepte/refuse depuis son tableau de bord.
+  const joinTok = PF.pendingJoinToken?.();
+  if (joinTok) {
+    try {
+      const club = await PF.getClubByJoinToken(joinTok);
+      if (club) await PF.requestToJoinClub(club.id);
+    } catch (e) { console.warn("[PF] join club:", e); }
+  }
   await hydrate();
   checkPaymentReturn();
   checkDeviceReturn();
@@ -723,7 +1084,7 @@ async function onLoggedIn() {
    rien ne lisait ce paramètre — l'utilisateur ne voyait jamais la
    confirmation, et l'état de la carte Synchronisation ne se rafraîchissait
    pas tant qu'il ne rechargeait pas la page à la main. */
-const DEVICE_RETURN_PROVIDERS = { strava: "Strava", garmin: "Garmin", coros: "Coros" };
+const DEVICE_RETURN_PROVIDERS = { strava: "Strava", garmin: "Garmin", coros: "Coros", polar: "Polar" };
 
 function checkDeviceReturn() {
   const params = new URLSearchParams(location.search);
@@ -761,6 +1122,7 @@ const PAYMENT_RETURN_PARAMS = {
   creneau: { successValue: "paid", cancelValue: "cancel", successKey: "payReturn.creneau.success", cancelKey: "payReturn.creneau.cancel" },
   coach_connect: { successValue: "done", cancelValue: "refresh", successKey: "payReturn.coachConnect.success", cancelKey: "payReturn.coachConnect.cancel" },
   club_connect: { successValue: "done", cancelValue: "refresh", successKey: "payReturn.clubConnect.success", cancelKey: "payReturn.clubConnect.cancel" },
+  premium: { successValue: "success", cancelValue: "cancel", successKey: "payReturn.premium.success", cancelKey: "payReturn.premium.cancel" },
 };
 // Retours sans message dédié (rien de décisif ne s'est produit) : on nettoie
 // juste l'URL pour ne pas laisser un ?portal=return disgracieux dans la barre.
