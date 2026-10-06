@@ -481,7 +481,7 @@ export async function polarImportRecent(sb: SupabaseClient, conn: any): Promise<
   const list = Array.isArray(acts) ? acts : (acts?.data ?? acts?.["training-sessions"] ?? acts?.exercises ?? []);
   if (!list.length) return 0;
   const rows = list.map((a: any) => normalizePolarActivity(a, conn.user_id));
-  if (rows.some((r) => r.provider_activity_id === "undefined")) {
+  if (rows.some((r: { provider_activity_id: string }) => r.provider_activity_id === "undefined")) {
     console.error("Polar: format de réponse inattendu, réponse brute :", JSON.stringify(acts).slice(0, 2000));
   }
   const { error } = await sb.from("external_activities")
