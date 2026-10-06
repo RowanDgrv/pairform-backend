@@ -60,10 +60,10 @@ async function listUsers(sb: ReturnType<typeof admin>) {
   // Club géré (clubs.owner_id) : un coach peut cumuler "coach de ses athlètes"
   // ET "gérant d'un club" (cf. sillance-app.core.js, window.__pf_ownsClub) —
   // affiché dans la page admin pour voir/vérifier ce cumul d'un coup d'œil.
-  const { data: clubs, error: cErr } = await sb.from("clubs").select("id, name, owner_id");
+  const { data: clubs, error: cErr } = await sb.from("clubs").select("id, name, owner_id, created_at, trial_days");
   if (cErr) throw cErr;
-  const clubByOwner = new Map<string, { id: string; name: string }>();
-  for (const c of clubs ?? []) clubByOwner.set(c.owner_id, { id: c.id, name: c.name });
+  const clubByOwner = new Map<string, { id: string; name: string; created_at: string; trial_days: number | null }>();
+  for (const c of clubs ?? []) clubByOwner.set(c.owner_id, { id: c.id, name: c.name, created_at: c.created_at, trial_days: c.trial_days });
 
   return (profiles ?? []).map((p) => ({
     id: p.id, role: p.role, full_name: p.full_name, email: p.email,
@@ -133,6 +133,21 @@ Deno.serve(async (req) => {
         .select("id").eq("user_id", userId).order("updated_at", { ascending: false }).limit(1).maybeSingle();
       if (!row) return json({ error: "Ce compte n'a pas encore de forfait — attribue d'abord un forfait." }, 404);
       const { error } = await sb.from("subscriptions").update({ founder: !!founder }).eq("id", row.id);
+      if (error) throw error;
+      return json({ ok: true });
+    }
+
+    // Durée d'essai gratuit personnalisée pour un club (avant paywall club,
+    // cf. renderClubGate côté front) — null remet la valeur par défaut
+    // (TRIAL_DAYS, 14j aujourd'hui). Geste ponctuel par club, comme founder.
+    if (action === "setClubTrialDays") {
+      const { clubId, trialDays } = p;
+      if (!clubId) return json({ error: "clubId requis" }, 400);
+      const days = trialDays == null || trialDays === "" ? null : Number(trialDays);
+      if (days != null && (!Number.isFinite(days) || days < 0)) {
+        return json({ error: "trialDays doit être un nombre positif ou null" }, 400);
+      }
+      const { error } = await sb.from("clubs").update({ trial_days: days }).eq("id", clubId);
       if (error) throw error;
       return json({ ok: true });
     }

@@ -13,7 +13,7 @@
  *   - window.PF        (exposé par sillance-client.js)
  *   - window.__pf_app  (hook exposé par le <script> inline de l'app)
  * ========================================================================== */
-import { PF } from "./sillance-client.js?v=20260928c";
+import { PF } from "./sillance-client.js?v=20260929d";
 window.PF = PF;
 
 function tr(key, vars) { return window.SilI18n ? window.SilI18n.t(key, vars) : key; }
@@ -447,6 +447,32 @@ async function hydrate() {
       }
       window.__pf_trial_days = trialDaysLeft;
       renderCoachGate({ subscribed: ok, role, trialDaysLeft, locked });
+
+      // Essai gratuit + paywall du CLUB (cumul possible avec coach, cf.
+      // admin-crm createClub). Lecture indépendante de myClubs() : les
+      // sections tournent en parallèle (Promise.all plus haut), on ne peut
+      // pas compter sur window.__pf_myClubs déjà posé par section("club").
+      let clubTrialDaysLeft = null, clubLocked = false, ownsClub = false;
+      if (!admin) {
+        try {
+          const myClubs = await PF.myClubs();
+          // Seul le PROPRIÉTAIRE du club voit le paywall (myClubs() renvoie
+          // aussi les clubs où ce compte n'est que staff/coach salarié —
+          // à lui de ne jamais voir une facture qui n'est pas la sienne).
+          const club = myClubs.find((c) => c.owner_id === uid) || null;
+          ownsClub = !!club;
+          if (club && !ok) {
+            const created = club.created_at ? new Date(club.created_at) : null;
+            const days = club.trial_days != null ? Number(club.trial_days) : TRIAL_DAYS;
+            if (created && !isNaN(created)) {
+              const end = new Date(created.getTime() + days * 86400000);
+              clubTrialDaysLeft = Math.ceil((end - Date.now()) / 86400000);
+              clubLocked = clubTrialDaysLeft <= 0;
+            }
+          }
+        } catch (e) { console.warn("[PF] club gate :", e); }
+      }
+      renderClubGate({ subscribed: ok, ownsClub, trialDaysLeft: clubTrialDaysLeft, locked: clubLocked });
     }),
 
     section("aiAddon", async () => {
@@ -976,43 +1002,43 @@ async function submitAuth() {
 function injectGateStyles() {
   if (document.getElementById("pf-gate-style")) return;
   const css = `
-  #pf-trial-banner{position:fixed;left:0;right:0;top:0;z-index:9990;
+  #pf-trial-banner,.pf-trial-banner{position:fixed;left:0;right:0;top:0;z-index:9990;
     background:#12313a;color:#d9f5fb;font:600 13px/1.3 'Archivo',system-ui;
     padding:9px 16px;text-align:center;border-bottom:1px solid #1c4a56}
-  #pf-trial-banner b{color:#46C2D8}
-  #pf-trial-banner button{margin-left:12px;border:1px solid #46C2D8;background:#46C2D8;color:#06222a;
+  #pf-trial-banner b,.pf-trial-banner b{color:#46C2D8}
+  #pf-trial-banner button,.pf-trial-banner button{margin-left:12px;border:1px solid #46C2D8;background:#46C2D8;color:#06222a;
     border-radius:99px;padding:5px 13px;font:700 12px 'Archivo',system-ui;cursor:pointer}
-  #pf-trial-banner button:hover{filter:brightness(1.06)}
-  #pf-lock-overlay{position:fixed;inset:0;z-index:9995;background:rgba(6,8,11,.9);
+  #pf-trial-banner button:hover,.pf-trial-banner button:hover{filter:brightness(1.06)}
+  #pf-lock-overlay,.pf-lock-overlay{position:fixed;inset:0;z-index:9995;background:rgba(6,8,11,.9);
     display:flex;align-items:center;justify-content:center;backdrop-filter:blur(6px);padding:20px}
-  #pf-lock-overlay .card{max-width:560px;width:100%;max-height:92vh;overflow-y:auto;background:#0f151b;border:1px solid #223;
+  #pf-lock-overlay .card,.pf-lock-overlay .card{max-width:560px;width:100%;max-height:92vh;overflow-y:auto;background:#0f151b;border:1px solid #223;
     border-radius:16px;padding:30px 28px;text-align:center;box-shadow:0 30px 80px -20px rgba(0,0,0,.7)}
-  #pf-lock-overlay h2{font:800 22px/1.15 'Oswald','Archivo',system-ui;color:#eaf6f9;margin:0 0 8px;letter-spacing:.2px}
-  #pf-lock-overlay p{font:400 14px/1.5 'Archivo',system-ui;color:#9fb0bb;margin:0 0 20px}
-  #pf-lock-overlay .price{font:800 30px 'Oswald',system-ui;color:#46C2D8;margin-bottom:2px}
-  #pf-lock-overlay .price small{font:600 13px 'Archivo';color:#7d8d98}
-  #pf-lock-overlay .go{width:100%;border:0;background:#46C2D8;color:#06222a;border-radius:11px;
+  #pf-lock-overlay h2,.pf-lock-overlay h2{font:800 22px/1.15 'Oswald','Archivo',system-ui;color:#eaf6f9;margin:0 0 8px;letter-spacing:.2px}
+  #pf-lock-overlay p,.pf-lock-overlay p{font:400 14px/1.5 'Archivo',system-ui;color:#9fb0bb;margin:0 0 20px}
+  #pf-lock-overlay .price,.pf-lock-overlay .price{font:800 30px 'Oswald',system-ui;color:#46C2D8;margin-bottom:2px}
+  #pf-lock-overlay .price small,.pf-lock-overlay .price small{font:600 13px 'Archivo';color:#7d8d98}
+  #pf-lock-overlay .go,.pf-lock-overlay .go{width:100%;border:0;background:#46C2D8;color:#06222a;border-radius:11px;
     padding:13px;font:800 15px 'Archivo',system-ui;cursor:pointer;margin-top:16px}
-  #pf-lock-overlay .go:hover{filter:brightness(1.06)}
-  #pf-lock-overlay .go:disabled{opacity:.5;cursor:not-allowed;filter:none}
-  #pf-lock-overlay .out{display:inline-block;margin-top:14px;color:#7d8d98;font:500 12.5px 'Archivo';
+  #pf-lock-overlay .go:hover,.pf-lock-overlay .go:hover{filter:brightness(1.06)}
+  #pf-lock-overlay .go:disabled,.pf-lock-overlay .go:disabled{opacity:.5;cursor:not-allowed;filter:none}
+  #pf-lock-overlay .out,.pf-lock-overlay .out{display:inline-block;margin-top:14px;color:#7d8d98;font:500 12.5px 'Archivo';
     background:none;border:0;cursor:pointer;text-decoration:underline}
-  #pf-lock-overlay .tier-lbl{font:700 11px 'Archivo',system-ui;letter-spacing:.09em;text-transform:uppercase;
+  #pf-lock-overlay .tier-lbl,.pf-lock-overlay .tier-lbl{font:700 11px 'Archivo',system-ui;letter-spacing:.09em;text-transform:uppercase;
     color:#7d8d98;text-align:left;margin:22px 0 10px}
-  #pf-lock-overlay .tier-picks{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
-  #pf-lock-overlay .tierpick{border:1.5px solid #223;background:#141c24;border-radius:12px;
+  #pf-lock-overlay .tier-picks,.pf-lock-overlay .tier-picks{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+  #pf-lock-overlay .tierpick,.pf-lock-overlay .tierpick{border:1.5px solid #223;background:#141c24;border-radius:12px;
     padding:14px 8px;cursor:pointer;text-align:center;font-family:'Archivo',system-ui;
     display:flex;flex-direction:column;gap:4px;transition:border-color .12s,background .12s}
-  #pf-lock-overlay .tierpick:hover{border-color:#3a5560}
-  #pf-lock-overlay .tierpick:disabled{opacity:.55;cursor:wait}
-  #pf-lock-overlay .tierpick .tp-price{font:800 19px 'Oswald',system-ui;color:#eaf6f9}
-  #pf-lock-overlay .tierpick .tp-price small{font:600 10.5px 'Archivo';color:#7d8d98}
-  #pf-lock-overlay .tierpick .tp-cap{font:500 11px/1.3 'Archivo';color:#8ea0aa}
-  #pf-lock-overlay .tier-included{list-style:none;margin:16px 0 0;padding:0;text-align:left;
+  #pf-lock-overlay .tierpick:hover,.pf-lock-overlay .tierpick:hover{border-color:#3a5560}
+  #pf-lock-overlay .tierpick:disabled,.pf-lock-overlay .tierpick:disabled{opacity:.55;cursor:wait}
+  #pf-lock-overlay .tierpick .tp-price,.pf-lock-overlay .tierpick .tp-price{font:800 19px 'Oswald',system-ui;color:#eaf6f9}
+  #pf-lock-overlay .tierpick .tp-price small,.pf-lock-overlay .tierpick .tp-price small{font:600 10.5px 'Archivo';color:#7d8d98}
+  #pf-lock-overlay .tierpick .tp-cap,.pf-lock-overlay .tierpick .tp-cap{font:500 11px/1.3 'Archivo';color:#8ea0aa}
+  #pf-lock-overlay .tier-included,.pf-lock-overlay .tier-included{list-style:none;margin:16px 0 0;padding:0;text-align:left;
     display:flex;flex-direction:column;gap:7px}
-  #pf-lock-overlay .tier-included li{font:400 12.5px/1.4 'Archivo',system-ui;color:#aebcc4;
+  #pf-lock-overlay .tier-included li,.pf-lock-overlay .tier-included li{font:400 12.5px/1.4 'Archivo',system-ui;color:#aebcc4;
     display:flex;gap:8px;align-items:baseline}
-  #pf-lock-overlay .tier-included li::before{content:"✓";color:#46C2D8;font-weight:700;flex:none}`;
+  #pf-lock-overlay .tier-included li::before,.pf-lock-overlay .tier-included li::before{content:"✓";color:#46C2D8;font-weight:700;flex:none}`;
   const s = document.createElement("style");
   s.id = "pf-gate-style"; s.textContent = css;
   document.head.appendChild(s);
@@ -1085,6 +1111,83 @@ function renderCoachGate({ subscribed, role, trialDaysLeft, locked }) {
     document.body.style.paddingTop = b.offsetHeight + "px";
     b.querySelector("#pf-trial-go").onclick = () =>
       PF.startCheckout("coach").catch((e) => console.warn("[PF] checkout:", e));
+  }
+}
+
+/* ===========================================================================
+ *  PAYWALL CLUB — même mécanique que le paywall coach ci-dessus, pour un
+ *  compte qui gère un club (window.__pf_ownsClub, cumul possible avec le
+ *  rôle coach — cf. admin-crm createClub). Essai basé sur clubs.created_at +
+ *  clubs.trial_days (NULL = TRIAL_DAYS par défaut, réglable par club via
+ *  admin-crm setClubTrialDays). 3 paliers dynamiques (cf. stripe-checkout
+ *  plan='club'), pas de Price ID Stripe fixe.
+ * ========================================================================= */
+function renderClubGate({ subscribed, ownsClub, trialDaysLeft, locked }) {
+  injectGateStyles();
+  const banner = document.getElementById("pf-club-trial-banner");
+  const overlay = document.getElementById("pf-club-lock-overlay");
+  if (banner) banner.remove();
+  if (overlay) overlay.remove();
+  if (!document.getElementById("pf-trial-banner")) document.body.style.paddingTop = "";
+  if (subscribed || !ownsClub) return;   // abonné ou pas gérant de club → rien
+
+  if (locked) {
+    const TIERS = [
+      { n: 1, price: 50, cap: tr("gate.club.tier1.cap") },
+      { n: 2, price: 112.5, cap: tr("gate.club.tier2.cap") },
+      { n: 3, price: 150, cap: tr("gate.club.tier3.cap") },
+    ];
+    const o = document.createElement("div");
+    o.id = "pf-club-lock-overlay";
+    o.className = "pf-lock-overlay";
+    o.innerHTML = `
+      <div class="card">
+        <h2>${tr("gate.club.trialOverHeading")}</h2>
+        <p>${tr("gate.club.trialOverText2")}</p>
+        <div class="tier-lbl">${tr("gate.club.pickTier")}</div>
+        <div class="tier-picks">
+          ${TIERS.map((t) => `
+            <button class="tierpick" data-tier="${t.n}">
+              <span class="tp-price">${String(t.price).replace(".", ",")}&nbsp;€<small> ${tr("gate.perMonth")}</small></span>
+              <span class="tp-cap">${t.cap}</span>
+            </button>`).join("")}
+        </div>
+        <div class="tier-lbl">${tr("gate.club.includedTitle")}</div>
+        <ul class="tier-included">
+          <li>${tr("gate.club.included.f1")}</li>
+          <li>${tr("gate.club.included.f2")}</li>
+          <li>${tr("gate.club.included.f3")}</li>
+        </ul>
+        <button class="out" id="pf-club-lock-out">${tr("auth.logOut")}</button>
+      </div>`;
+    document.body.appendChild(o);
+    o.querySelectorAll(".tierpick").forEach((btn) => {
+      btn.onclick = () => {
+        o.querySelectorAll(".tierpick").forEach((b) => (b.disabled = true));
+        btn.querySelector(".tp-price").textContent = tr("gate.selecting");
+        PF.startCheckout("club", Number(btn.dataset.tier)).catch((e) => {
+          console.warn("[PF] checkout:", e);
+          o.querySelectorAll(".tierpick").forEach((b) => (b.disabled = false));
+        });
+      };
+    });
+    o.querySelector("#pf-club-lock-out").onclick = async () => {
+      try { await PF.signOut(); } catch (_) {} location.reload();
+    };
+    return;
+  }
+
+  if (trialDaysLeft != null) {
+    const b = document.createElement("div");
+    b.id = "pf-club-trial-banner";
+    b.className = "pf-trial-banner";
+    const j = trialDaysLeft <= 1 ? tr("gate.lastDay") : tr("gate.daysLeft", { n: trialDaysLeft });
+    b.innerHTML = `🎁 ${tr("gate.club.freeTrial")} — <b>${j}</b>
+      <button id="pf-club-trial-go">${tr("gate.club.subscribePrice")}</button>`;
+    document.body.appendChild(b);
+    if (!document.getElementById("pf-trial-banner")) document.body.style.paddingTop = b.offsetHeight + "px";
+    b.querySelector("#pf-club-trial-go").onclick = () =>
+      PF.startCheckout("club", 1).catch((e) => console.warn("[PF] checkout:", e));
   }
 }
 

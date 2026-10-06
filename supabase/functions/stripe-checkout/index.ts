@@ -5,8 +5,10 @@
 //  - plan==='coach' : 3 paliers auto-déclarés selon le nombre d'athlètes
 //    coachés (1-10 / 11-30 / 31+), prix dynamique (price_data), pas de
 //    Price ID Stripe fixe à créer/maintenir.
-//  - athlete/club : inchangé, Price ID fixe via env (legacy, peu utilisé —
-//    ces 2 rôles ont chacun leur propre edge function dédiée par ailleurs).
+//  - plan==='club' : 3 paliers (Club / Grand club / Club illimité), même
+//    mécanique price_data que coach — pas de Price ID Stripe fixe.
+//  - athlete : inchangé, Price ID fixe via env (legacy, peu utilisé — ce
+//    rôle a sa propre edge function dédiée par ailleurs).
 //  Auth : l'utilisateur doit être connecté (JWT Supabase dans Authorization).
 // =============================================================================
 import Stripe from "https://esm.sh/stripe@16.12.0?target=deno";
@@ -18,10 +20,9 @@ const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY")!, {
   httpClient: Stripe.createFetchHttpClient(),
 });
 
-// Mappe chaque plan (hors coach) vers un Price ID Stripe fixe.
+// Mappe chaque plan hors coach/club vers un Price ID Stripe fixe.
 const PRICE_BY_PLAN: Record<string, string | undefined> = {
   athlete: Deno.env.get("STRIPE_PRICE_ATHLETE"),
-  club: Deno.env.get("STRIPE_PRICE_CLUB"),
 };
 
 // Paliers coach : 1 = 1-10 athlètes, 2 = 11-30, 3 = 31+.
@@ -29,6 +30,13 @@ const COACH_TIERS: Record<number, { price: number; label: string }> = {
   1: { price: Number(Deno.env.get("COACH_TIER1_PRICE_EUR") ?? "19"), label: "1 à 10 athlètes" },
   2: { price: Number(Deno.env.get("COACH_TIER2_PRICE_EUR") ?? "29"), label: "11 à 30 athlètes" },
   3: { price: Number(Deno.env.get("COACH_TIER3_PRICE_EUR") ?? "49"), label: "31+ athlètes" },
+};
+
+// Paliers club : 1 = Club, 2 = Grand club, 3 = Club illimité.
+const CLUB_TIERS: Record<number, { price: number; label: string }> = {
+  1: { price: Number(Deno.env.get("CLUB_TIER1_PRICE_EUR") ?? "50"), label: "Club" },
+  2: { price: Number(Deno.env.get("CLUB_TIER2_PRICE_EUR") ?? "112.5"), label: "Grand club" },
+  3: { price: Number(Deno.env.get("CLUB_TIER3_PRICE_EUR") ?? "150"), label: "Club illimité" },
 };
 
 const APP_URL = Deno.env.get("APP_URL") ?? "http://localhost:5500";
@@ -42,11 +50,11 @@ Deno.serve(async (req) => {
     const { plan, tier } = await req.json();
 
     let lineItem: Stripe.Checkout.SessionCreateParams.LineItem;
-    let coachTier: number | null = null;
+    let planTier: number | null = null;
 
     if (plan === "coach") {
-      coachTier = [1, 2, 3].includes(Number(tier)) ? Number(tier) : 1;
-      const t = COACH_TIERS[coachTier];
+      planTier = [1, 2, 3].includes(Number(tier)) ? Number(tier) : 1;
+      const t = COACH_TIERS[planTier];
       lineItem = {
         quantity: 1,
         price_data: {
@@ -54,6 +62,18 @@ Deno.serve(async (req) => {
           unit_amount: Math.round(t.price * 100),
           recurring: { interval: "month" },
           product_data: { name: `Sillance — Abonnement Coach (${t.label})` },
+        },
+      };
+    } else if (plan === "club") {
+      planTier = [1, 2, 3].includes(Number(tier)) ? Number(tier) : 1;
+      const t = CLUB_TIERS[planTier];
+      lineItem = {
+        quantity: 1,
+        price_data: {
+          currency: "eur",
+          unit_amount: Math.round(t.price * 100),
+          recurring: { interval: "month" },
+          product_data: { name: `Sillance — Abonnement ${t.label}` },
         },
       };
     } else {
@@ -96,7 +116,7 @@ Deno.serve(async (req) => {
     }
 
     const subMeta: Record<string, string> = { supabase_user_id: user.id, plan };
-    if (coachTier != null) subMeta.tier = String(coachTier);
+    if (planTier != null) subMeta.tier = String(planTier);
 
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
