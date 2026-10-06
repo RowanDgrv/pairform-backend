@@ -9,35 +9,111 @@
 
   function tr(key, vars){ return global.SilI18n ? global.SilI18n.t(key, vars) : key; }
 
-  var STEPS = [
-    { id:'welcome', target:null, get title(){return tr('tour.welcome.title')},
-      get text(){return tr('tour.welcome.text')},
-      get cta(){return tr('tour.welcome.cta')} },
-    { id:'create', target:'#createSessionBtn', get title(){return tr('tour.create.title')},
-      get text(){return tr('tour.create.text')}, wait:'click' },
-    { id:'sport', target:'#bDiscPick', get title(){return tr('tour.sport.title')},
-      get text(){return tr('tour.sport.text')}, wait:'change',
-      accept:function(el){ return el.value==='run'; } },
-    { id:'warmup', target:'#bBlocks .bk:first-child .bk-lines .ln', get title(){return tr('tour.warmup.title')},
-      get text(){return tr('tour.warmup.text')},
-      get cta(){return tr('tour.warmup.cta')} },
-    { id:'addexo', target:'#bBlocks .bk:nth-child(2) [data-add="exo"]', get title(){return tr('tour.addexo.title')},
-      get text(){return tr('tour.addexo.text')}, wait:'click' },
-    { id:'intensity', target:'#bBlocks .bk:nth-child(2) .bk-lines .ln:last-child .ln-zonesel', get title(){return tr('tour.intensity.title')},
-      get text(){return tr('tour.intensity.text')}, wait:'change' },
-    { id:'recov', target:'#bBlocks .bk:nth-child(2) [data-add="recov"]', get title(){return tr('tour.recov.title')},
-      get text(){return tr('tour.recov.text')}, wait:'click' },
-    { id:'series', target:'#bBlocks .bk:nth-child(2) [data-f="series"]', get title(){return tr('tour.series.title')},
-      get text(){return tr('tour.series.text')}, wait:'input' },
-    { id:'save', target:'#bSaveCal', get title(){return tr('tour.save.title')},
-      get text(){return tr('tour.save.text')}, wait:'click' }
-  ];
+  /* TOURS : registre de tous les tutos guidés — chacun {steps, doneKey,
+     modeBtnId}. `doneKey` = clé localStorage marquant le tuto comme vu ;
+     `modeBtnId` = id du bouton de mode qui doit être actif pour que le tuto
+     reste affiché (sinon abandon propre, cf. isModeActive). */
+  var TOURS = {
+    session: {
+      doneKey: 'sil_tour_done',
+      modeBtnId: 'modeCoach',
+      steps: [
+        { id:'welcome', target:null, get title(){return tr('tour.welcome.title')},
+          get text(){return tr('tour.welcome.text')},
+          get cta(){return tr('tour.welcome.cta')} },
+        { id:'create', target:'#createSessionBtn', get title(){return tr('tour.create.title')},
+          get text(){return tr('tour.create.text')}, wait:'click' },
+        { id:'sport', target:'#bDiscPick', get title(){return tr('tour.sport.title')},
+          get text(){return tr('tour.sport.text')}, wait:'change',
+          accept:function(el){ return el.value==='run'; } },
+        { id:'warmup', target:'#bBlocks .bk:first-child .bk-lines .ln', get title(){return tr('tour.warmup.title')},
+          get text(){return tr('tour.warmup.text')},
+          get cta(){return tr('tour.warmup.cta')} },
+        { id:'addexo', target:'#bBlocks .bk:nth-child(2) [data-add="exo"]', get title(){return tr('tour.addexo.title')},
+          get text(){return tr('tour.addexo.text')}, wait:'click' },
+        { id:'intensity', target:'#bBlocks .bk:nth-child(2) .bk-lines .ln:last-child .ln-zonesel', get title(){return tr('tour.intensity.title')},
+          get text(){return tr('tour.intensity.text')}, wait:'change' },
+        { id:'recov', target:'#bBlocks .bk:nth-child(2) [data-add="recov"]', get title(){return tr('tour.recov.title')},
+          get text(){return tr('tour.recov.text')}, wait:'click' },
+        { id:'series', target:'#bBlocks .bk:nth-child(2) [data-f="series"]', get title(){return tr('tour.series.title')},
+          get text(){return tr('tour.series.text')}, wait:'input' },
+        { id:'save', target:'#bSaveCal', get title(){return tr('tour.save.title')},
+          get text(){return tr('tour.save.text')}, wait:'click' }
+      ]
+    },
+    groupes: {
+      doneKey: 'sil_tour_done_groupes',
+      modeBtnId: 'modeClub',
+      steps: [
+        { id:'welcome', target:null, get title(){return tr('tour.groupes.welcome.title')},
+          get text(){return tr('tour.groupes.welcome.text')},
+          get cta(){return tr('tour.groupes.welcome.cta')} },
+        { id:'open', target:'#clubAddGroup', get title(){return tr('tour.groupes.open.title')},
+          get text(){return tr('tour.groupes.open.text')}, wait:'click' },
+        { id:'name', target:'#grpName', get title(){return tr('tour.groupes.name.title')},
+          get text(){return tr('tour.groupes.name.text')}, wait:'input' },
+        { id:'color', target:'#grpColors', get title(){return tr('tour.groupes.color.title')},
+          get text(){return tr('tour.groupes.color.text')}, wait:'click' },
+        { id:'members', target:'#grpMembers', get title(){return tr('tour.groupes.members.title')},
+          get text(){return tr('tour.groupes.members.text')}, wait:'click' },
+        { id:'save', target:'#grpSave', get title(){return tr('tour.groupes.save.title')},
+          get text(){return tr('tour.groupes.save.text')}, wait:'click' }
+      ]
+    },
+    suivi: {
+      doneKey: 'sil_tour_done_suivi',
+      modeBtnId: 'modeClub',
+      steps: [
+        { id:'welcome', target:null, get title(){return tr('tour.suivi.welcome.title')},
+          get text(){return tr('tour.suivi.welcome.text')},
+          get cta(){return tr('tour.suivi.welcome.cta')} },
+        { id:'open', target:'.suivi-card:first-child [data-suivi-add]', get title(){return tr('tour.suivi.open.title')},
+          get text(){return tr('tour.suivi.open.text')}, wait:'click' },
+        { id:'disc', target:'#ttDisc', get title(){return tr('tour.suivi.disc.title')},
+          get text(){return tr('tour.suivi.disc.text')}, wait:'change' },
+        { id:'event', target:'#ttEvent', get title(){return tr('tour.suivi.event.title')},
+          get text(){return tr('tour.suivi.event.text')}, wait:'change' },
+        { id:'time', target:'#ttTime', get title(){return tr('tour.suivi.time.title')},
+          get text(){return tr('tour.suivi.time.text')}, wait:'input' },
+        { id:'save', target:'#ttSave', get title(){return tr('tour.suivi.save.title')},
+          get text(){return tr('tour.suivi.save.text')}, wait:'click' }
+      ]
+    },
+    competitions: {
+      doneKey: 'sil_tour_done_competitions',
+      modeBtnId: 'modeClub',
+      steps: [
+        { id:'welcome', target:null, get title(){return tr('tour.competitions.welcome.title')},
+          get text(){return tr('tour.competitions.welcome.text')},
+          get cta(){return tr('tour.competitions.welcome.cta')} },
+        { id:'open', target:'#clubAddCompetition', get title(){return tr('tour.competitions.open.title')},
+          get text(){return tr('tour.competitions.open.text')}, wait:'click' },
+        { id:'name', target:'#cpName', get title(){return tr('tour.competitions.name.title')},
+          get text(){return tr('tour.competitions.name.text')}, wait:'input' },
+        { id:'date', target:'#cpDate', get title(){return tr('tour.competitions.date.title')},
+          get text(){return tr('tour.competitions.date.text')}, wait:'change' },
+        { id:'level', target:'#cpLevel', get title(){return tr('tour.competitions.level.title')},
+          get text(){return tr('tour.competitions.level.text')}, wait:'change' },
+        { id:'group', target:'#cpGroup', get title(){return tr('tour.competitions.group.title')},
+          get text(){return tr('tour.competitions.group.text')}, wait:'change' },
+        { id:'save', target:'#cpSave', get title(){return tr('tour.competitions.save.title')},
+          get text(){return tr('tour.competitions.save.text')}, wait:'click' },
+        { id:'respond', target:'[data-comp-confirm]', get title(){return tr('tour.competitions.respond.title')},
+          get text(){return tr('tour.competitions.respond.text')},
+          get cta(){return tr('tour.competitions.respond.cta')} }
+      ]
+    }
+  };
 
   var active = false;
+  var currentTourId = null;
   var currentIndex = -1;
   var currentStep = null;
   var rafId = null;
   var veilEl, spotEl, calloutEl;
+
+  function currentTour(){ return TOURS[currentTourId]; }
+  function currentSteps(){ var t = currentTour(); return t ? t.steps : []; }
 
   function qs(sel){ return sel ? document.querySelector(sel) : null; }
 
@@ -100,7 +176,7 @@
 
   function renderCallout(step){
     var stepNo = currentIndex + 1;
-    var html = '<div class="stc-step">' + tr('tour.stepCounter', {n:stepNo, total:STEPS.length}) + '</div>'
+    var html = '<div class="stc-step">' + tr('tour.stepCounter', {n:stepNo, total:currentSteps().length}) + '</div>'
       + '<div class="stc-title">' + step.title + '</div>'
       + '<div class="stc-text">' + step.text + '</div>';
     if(step.cta){
@@ -165,7 +241,7 @@
   function updatePosition(){
     rafId = null;
     if(!active || !currentStep) return;
-    if(!isCoachMode()){ finishTour(false); return; }
+    if(!isModeActive(currentTour().modeBtnId)){ finishTour(false); return; }
     var el = qs(currentStep.target);
     if(currentStep.target && !isRendered(el)){ finishTour(false); return; }
     positionFor(currentStep, el);
@@ -182,6 +258,7 @@
   }
 
   function activateStep(step){
+    step._advancing = false;
     currentStep = step;
     renderCallout(step);
     var el = qs(step.target);
@@ -192,58 +269,111 @@
 
   function advance(){
     currentIndex++;
-    if(currentIndex >= STEPS.length){ finishTour(true); return; }
-    activateStep(STEPS[currentIndex]);
+    var steps = currentSteps();
+    if(currentIndex >= steps.length){ finishTour(true); return; }
+    activateStep(steps[currentIndex]);
   }
 
   function onDomEvent(e){
     if(!active || !currentStep || !currentStep.wait) return;
     if(e.type !== currentStep.wait) return;
     var el = e.target && e.target.closest && e.target.closest(currentStep.target);
-    if(!el) return;
-    if(currentStep.accept && !currentStep.accept(el)) return;
-    setTimeout(advance, 80);
+    if(el){
+      if(currentStep.accept && !currentStep.accept(el)) return;
+      // Garde-fou : plusieurs événements (ex. plusieurs touches tapées vite
+      // dans un champ texte, ou un collé) peuvent matcher la même étape avant
+      // que le premier setTimeout n'ait fait avancer le tuto — sans ce drapeau,
+      // chaque frappe programme son propre advance() et le tuto saute
+      // plusieurs étapes d'un coup. Le drapeau est propre à l'objet étape et
+      // se réinitialise naturellement dès qu'on passe à l'étape suivante.
+      if(currentStep._advancing) return;
+      currentStep._advancing = true;
+      setTimeout(advance, 80);
+      return;
+    }
+    // Le clic ne correspond pas à la cible attendue : peut-être un changement
+    // de mode (Coach/Club) ou d'onglet club en cours de tuto — si la cible de
+    // l'étape a disparu de l'écran, on referme proprement plutôt que de
+    // laisser la bulle flotter sur un écran qui n'a plus de rapport avec elle.
+    // Capturé en phase capture (avant le handler du bouton cliqué) : le
+    // changement de mode/onglet n'a pas encore eu lieu au moment de ce
+    // callback, d'où le setTimeout(0) pour revérifier une fois le clic traité.
+    if(e.type !== 'click') return;
+    var tourAtClick = currentTourId, stepAtClick = currentStep;
+    setTimeout(function(){
+      if(!active || currentTourId !== tourAtClick || currentStep !== stepAtClick) return;
+      if(!isModeActive(currentTour().modeBtnId) || (stepAtClick.target && !isRendered(qs(stepAtClick.target)))){
+        finishTour(false);
+      }
+    }, 0);
   }
 
+  var TOUR_FINISH_TOAST = {
+    session: 'tour.finishToast',
+    groupes: 'tour.groupes.finishToast',
+    suivi: 'tour.suivi.finishToast',
+    competitions: 'tour.competitions.finishToast'
+  };
+
   function finishTour(completed){
+    var tourId = currentTourId;
     active = false;
     currentStep = null;
     if(rafId) cancelAnimationFrame(rafId);
     rafId = null;
     teardownUI();
     setHyroxOptionVisible(true);
-    try{ localStorage.setItem('sil_tour_done', completed ? '1' : 'skipped'); }catch(e){}
+    try{ localStorage.setItem(TOURS[tourId].doneKey, completed ? '1' : 'skipped'); }catch(e){}
     if(completed && typeof global.toast === 'function'){
-      global.toast(tr('tour.finishToast'));
+      global.toast(tr(TOUR_FINISH_TOAST[tourId] || 'tour.finishToast'));
     }
+    currentTourId = null;
   }
 
-  function start(){
+  function start(tourId){
     if(active) return;
+    tourId = tourId || 'session';
+    if(!TOURS[tourId]) return;
     injectStyles();
     ensureUI();
     var ov = document.getElementById('builderOverlay');
     if(ov && ov.classList.contains('open') && typeof global.closeBuilder === 'function'){ global.closeBuilder(); }
     setHyroxOptionVisible(false);
     active = true;
+    currentTourId = tourId;
     currentIndex = -1;
     advance();
   }
 
-  function isCoachMode(){
-    var btn = document.getElementById('modeCoach');
+  function isModeActive(modeBtnId){
+    var btn = document.getElementById(modeBtnId);
     return !!btn && btn.classList.contains('active');
   }
 
+  // L'écran d'accueil démo (#welcomeOverlay, z-index 200) est bien en dessous
+  // du voile du tuto (z-index 99997) : si l'auto-lancement tombait pendant que
+  // ce welcome est encore ouvert, le voile du tuto s'affichait par-dessus et
+  // rendait son bouton "Commencer à explorer" inatteignable — la page semblait
+  // bloquée (rapporté 25/08/2026). On attend sa fermeture avant de démarrer.
+  function welcomeOverlayOpen(){
+    var ov = document.getElementById('welcomeOverlay');
+    return !!ov && getComputedStyle(ov).display !== 'none';
+  }
+
+  // Auto-lancement réservé au tour "session" (onboarding création de séance) —
+  // les tutos club sont volontairement à déclenchement manuel uniquement, pour
+  // ne pas enchaîner plusieurs tours automatiques d'affilée sur un même compte.
   function maybeAutoLaunch(){
     try{
-      if(localStorage.getItem('sil_tour_done')) return;
+      if(localStorage.getItem(TOURS.session.doneKey)) return;
     }catch(e){ return; }
-    setTimeout(function(){
+    function attempt(){
       if(active) return;
-      if(!isCoachMode()) return;
-      start();
-    }, 900);
+      if(!isModeActive(TOURS.session.modeBtnId)) return;
+      if(welcomeOverlayOpen()){ setTimeout(attempt, 400); return; }
+      start('session');
+    }
+    setTimeout(attempt, 900);
   }
 
   function init(){
@@ -254,7 +384,13 @@
     window.addEventListener('resize', scheduleReposition);
     window.addEventListener('scroll', scheduleReposition, true);
     var btn = document.getElementById('tutoBtn');
-    if(btn) btn.addEventListener('click', start);
+    if(btn) btn.addEventListener('click', function(){ start('session'); });
+    var btnGroupes = document.getElementById('tutoBtnGroupes');
+    if(btnGroupes) btnGroupes.addEventListener('click', function(){ start('groupes'); });
+    var btnSuivi = document.getElementById('tutoBtnSuivi');
+    if(btnSuivi) btnSuivi.addEventListener('click', function(){ start('suivi'); });
+    var btnCompetitions = document.getElementById('tutoBtnCompetitions');
+    if(btnCompetitions) btnCompetitions.addEventListener('click', function(){ start('competitions'); });
     maybeAutoLaunch();
   }
 
