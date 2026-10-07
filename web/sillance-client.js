@@ -159,6 +159,14 @@ export const PF = {
   async summarizeSession(payload) {
     return await this._invoke("session-summary", payload);
   },
+  // Génère (ou relit depuis le cache) la synthèse IA de la SEMAINE (toutes
+  // les séances réalisées par un athlète sur 7 jours), pour le bouton
+  // "Assistant IA sur la semaine" sous le calendrier (07/10/2026).
+  // payload : { athlete_id?, week_key, sessions, force? }
+  // Renvoie { verdict, headline, bullets, recos, model, cached } ou {error:'add_on_required'|'no_sessions'}.
+  async summarizeWeek(payload) {
+    return await this._invoke("week-review", payload);
+  },
   // ---- Option « Vidéos » PAR ATHLÈTE (le coach paie un siège par athlète) ----
   // Liste des activations vidéo du coach connecté : [{athlete_id, active}].
   async getVideoAccess() {

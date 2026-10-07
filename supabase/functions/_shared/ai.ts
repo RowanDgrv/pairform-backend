@@ -99,6 +99,74 @@ export async function summarize(bilan: unknown): Promise<{ summary: ClaudeSummar
   return { summary, model: MODEL };
 }
 
+// ---- Synthèse HEBDOMADAIRE (07/10/2026) : même esprit que SYSTEM_PROMPT
+// ci-dessus, mais sur une LISTE de séances déjà réalisées dans la semaine
+// plutôt qu'une seule — juge l'adhérence et la répartition d'ensemble,
+// pas chaque séance en détail (ce rôle reste à l'assistant par séance).
+export const WEEK_SYSTEM_PROMPT = `Tu es l'assistant d'un coach d'endurance (triathlon, course, vélo, Hyrox).
+On te fournit la LISTE des séances RÉALISÉES par un athlète sur UNE semaine :
+titre, discipline, durée prévue/réalisée, TSS, zone cible, RPE si renseigné.
+Ce sont des mesures DÉJÀ CALCULÉES, ne recalcule rien. Ton rôle est de juger la
+semaine DANS SON ENSEMBLE (adhérence au plan, répartition de l'intensité,
+cohérence de la charge) et de donner des recommandations pour la semaine
+suivante, comme un bon coach qui relit sa semaine avant d'ajuster la suite.
+
+Réponds en français, concis, ton de coach. Réponds STRICTEMENT en JSON
+valide, sans texte autour, même forme que pour une séance :
+{
+  "verdict": "oui" | "partiel" | "non",   // la semaine s'est déroulée comme prévu ?
+  "headline": string,                       // 1 phrase de synthèse de la semaine
+  "bullets": [ { "status": "ok"|"warn"|"bad", "text": string } ],  // 2 à 5 constats chiffrés
+  "recos": [ string ]                       // 0 à 3 recommandations pour la semaine suivante
+}
+
+Points à vérifier :
+- Adhérence : nombre de séances réalisées vs prévues, écart de durée/TSS cumulé.
+- Répartition : trop de séances dans la même zone/discipline ? un manque de
+  récupération (RPE élevés enchaînés sans séance facile) ?
+- Charge totale cohérente avec l'historique si donné, sinon juge sur la
+  semaine seule.
+
+Sois factuel : chaque bullet doit citer un chiffre de la liste fournie.`;
+
+export async function summarizeWeek(
+  sessions: unknown[],
+): Promise<{ summary: ClaudeSummary; model: string }> {
+  const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
+  if (!apiKey) throw new Error("ANTHROPIC_API_KEY manquant");
+
+  const res = await fetch(ANTHROPIC_URL, {
+    method: "POST",
+    headers: {
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      model: MODEL,
+      max_tokens: 800,
+      system: [
+        { type: "text", text: WEEK_SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
+      ],
+      messages: [
+        {
+          role: "user",
+          content: `Séances réalisées cette semaine (JSON) :\n${JSON.stringify(sessions)}`,
+        },
+      ],
+    }),
+  });
+
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error(`Anthropic ${res.status}: ${txt}`);
+  }
+  const data = await res.json();
+  const text: string = data?.content?.[0]?.text ?? "";
+  const summary = parseJson(text);
+  return { summary, model: MODEL };
+}
+
 // Claude renvoie du JSON ; on tolère un éventuel bloc ```json … ```.
 function parseJson(text: string): ClaudeSummary {
   let t = text.trim();
