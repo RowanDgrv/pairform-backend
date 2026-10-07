@@ -169,9 +169,41 @@
     }
     requestAnimationFrame(frame);
 
+    // Coût GPU/CPU continu (signalé 06/10/2026 : trop lourd pour un PC coach
+    // peu puissant) — le shader tournait à 60fps en permanence, même canvas
+    // hors écran (scrollé) ou onglet en arrière-plan. Deux pauses auto,
+    // cumulables avec freeze/resume manuels déjà utilisés ailleurs (captures) :
+    // elles ne figent/reprennent que si l'appelant n'a pas lui-même figé
+    // (freeze manuel prioritaire, cf. mutualPause/mutualResume ci-dessous).
+    var manuallyFrozen = reduceMotion;  // état voulu par l'appelant (freeze()/resume())
+    var hiddenByViewport = false, hiddenByTab = (typeof document !== 'undefined' && document.hidden);
+
+    function applyAutoPause() {
+      var shouldFreeze = manuallyFrozen || hiddenByViewport || hiddenByTab;
+      if (shouldFreeze && !frozen) { frozen = true; freezeT = (performance.now() - start) / 1000; draw(freezeT); }
+      else if (!shouldFreeze && frozen) { frozen = false; start = performance.now() - freezeT * 1000; requestAnimationFrame(frame); }
+    }
+
+    if (typeof IntersectionObserver !== 'undefined') {
+      var io = new IntersectionObserver(function (entries) {
+        hiddenByViewport = !entries[entries.length - 1].isIntersecting;
+        applyAutoPause();
+      }, { threshold: 0 });
+      io.observe(canvas);
+    }
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', function () {
+        hiddenByTab = document.hidden;
+        applyAutoPause();
+      });
+    }
+
     return {
-      freeze: function (t) { frozen = true; freezeT = t; draw(t); },
-      resume: function () { if (!lost) { frozen = false; start = performance.now() - freezeT * 1000; requestAnimationFrame(frame); } }
+      freeze: function (t) { manuallyFrozen = true; freezeT = t; frozen = true; draw(t); },
+      resume: function () {
+        manuallyFrozen = false;
+        if (!lost) applyAutoPause();
+      }
     };
   }
 
