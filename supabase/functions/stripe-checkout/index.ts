@@ -47,7 +47,12 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { plan, tier } = await req.json();
+    const { plan, tier, interval: intervalRaw } = await req.json();
+    // Annuel = 11 mois facturés (1 mois offert, décidé 07/10/2026) — montant
+    // calculé ici à partir du prix mensuel de référence, jamais codé en dur
+    // ailleurs, pour ne jamais diverger entre coach/club ni entre paliers.
+    const interval: "month" | "year" = intervalRaw === "year" ? "year" : "month";
+    const ANNUAL_MONTHS_BILLED = 11;
 
     let lineItem: Stripe.Checkout.SessionCreateParams.LineItem;
     let planTier: number | null = null;
@@ -55,24 +60,26 @@ Deno.serve(async (req) => {
     if (plan === "coach") {
       planTier = [1, 2, 3].includes(Number(tier)) ? Number(tier) : 1;
       const t = COACH_TIERS[planTier];
+      const amount = interval === "year" ? t.price * ANNUAL_MONTHS_BILLED : t.price;
       lineItem = {
         quantity: 1,
         price_data: {
           currency: "eur",
-          unit_amount: Math.round(t.price * 100),
-          recurring: { interval: "month" },
+          unit_amount: Math.round(amount * 100),
+          recurring: { interval },
           product_data: { name: `Sillance — Abonnement Coach (${t.label})` },
         },
       };
     } else if (plan === "club") {
       planTier = [1, 2, 3].includes(Number(tier)) ? Number(tier) : 1;
       const t = CLUB_TIERS[planTier];
+      const amount = interval === "year" ? t.price * ANNUAL_MONTHS_BILLED : t.price;
       lineItem = {
         quantity: 1,
         price_data: {
           currency: "eur",
-          unit_amount: Math.round(t.price * 100),
-          recurring: { interval: "month" },
+          unit_amount: Math.round(amount * 100),
+          recurring: { interval },
           product_data: { name: `Sillance — Abonnement ${t.label}` },
         },
       };

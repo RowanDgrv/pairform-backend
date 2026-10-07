@@ -111,10 +111,13 @@ export const PF = {
   },
 
   // -------- ABONNEMENT (Stripe) --------
-  // plan ∈ 'coach' | 'athlete' | 'club'. tier (coach uniquement) ∈ 1|2|3
-  // = 1-10 / 11-30 / 31+ athlètes coachés (auto-déclaré).
-  async startCheckout(plan, tier) {
-    const body = tier ? { plan, tier } : { plan };
+  // plan ∈ 'coach' | 'athlete' | 'club'. tier (coach/club) ∈ 1|2|3 = paliers
+  // (cf. stripe-checkout). interval ∈ 'month'|'year' (07/10/2026, mensuel/
+  // annuel) — omis = mensuel, comportement inchangé pour les anciens appels.
+  async startCheckout(plan, tier, interval) {
+    const body = { plan };
+    if (tier) body.tier = tier;
+    if (interval) body.interval = interval;
     const { url } = await this._invoke("stripe-checkout", body);
     window.location.href = url;
   },
