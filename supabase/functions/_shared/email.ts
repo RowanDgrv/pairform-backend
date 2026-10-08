@@ -4,9 +4,9 @@
 //  d'invitation continue de fonctionner en renvoyant le lien à partager.
 //  Secrets : RESEND_API_KEY, RESEND_FROM (ex: "Sillance <invite@sillance.app>").
 // =============================================================================
-export async function sendEmail(opts: { to: string; subject: string; html: string }): Promise<boolean> {
+export async function sendEmail(opts: { to: string; subject: string; html: string; from?: string }): Promise<boolean> {
   const key = Deno.env.get("RESEND_API_KEY");
-  const from = Deno.env.get("RESEND_FROM") ?? "Sillance <onboarding@resend.dev>";
+  const from = opts.from ?? Deno.env.get("RESEND_FROM") ?? "Sillance <onboarding@resend.dev>";
   if (!key) return false;
 
   const res = await fetch("https://api.resend.com/emails", {

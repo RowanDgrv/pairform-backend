@@ -233,11 +233,32 @@ async function upsertClubMembership(sub: Stripe.Subscription) {
     updated_at: new Date().toISOString(),
   };
 
-  const { error } = await supabase
+  const { data: saved, error } = await supabase
     .from("club_memberships")
-    .upsert(row, { onConflict: "stripe_subscription_id" });
+    .upsert(row, { onConflict: "stripe_subscription_id" })
+    .select("id, assigned_coach_id, status")
+    .single();
 
-  if (error) console.error("Upsert club_membership échoué :", error);
+  if (error) { console.error("Upsert club_membership échoué :", error); return; }
+
+  // tier='coach' : le lien coach_athlete né de cette adhésion doit suivre le
+  // statut du paiement — actif tant que l'abonnement l'est, révoqué sinon
+  // (impayé, résilié…). Ne touche que les liens marqués comme venant d'ICI
+  // (source_club_membership_id) — jamais un lien coach_athlete personnel.
+  if (row.tier === "coach" && saved?.assigned_coach_id) {
+    const active = ["active", "trialing"].includes(saved.status);
+    const { data: member } = await supabase
+      .from("club_members").select("athlete_id").eq("id", row.member_id).single();
+    if (member?.athlete_id) {
+      const { error: syncErr } = await supabase
+        .from("coach_athlete")
+        .update({ status: active ? "active" : "archived" })
+        .eq("coach_id", saved.assigned_coach_id)
+        .eq("athlete_id", member.athlete_id)
+        .eq("source_club_membership_id", saved.id);
+      if (syncErr) console.error("Sync coach_athlete (club_membership) échouée :", syncErr);
+    }
+  }
 }
 
 // Abonnement d'un athlète au suivi d'un coach. Métadonnées posées par
