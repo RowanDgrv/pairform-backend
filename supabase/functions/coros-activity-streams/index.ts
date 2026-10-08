@@ -2,7 +2,12 @@
 //  Edge Function : coros-activity-streams  (détail seconde-par-seconde à la demande)
 //  Pendant de strava-activity-streams pour les activités importées via COROS.
 //  Body : { activity_id }  (uuid de la ligne external_activities)
-//  Auth : JWT requis, propriétaire uniquement.
+//  Auth : JWT requis, propriétaire OU coach actif de l'athlète (contrairement
+//         à Strava, COROS n'a pas de clause ToS interdisant le partage coach
+//         — cf. migration 0010_strava_tos.sql : "provider <> 'strava'" est
+//         justement ce qui autorise déjà le coach à LIRE les activités COROS
+//         de son athlète au niveau RLS. Cette fonction tourne en service role
+//         (bypass RLS) donc doit reproduire la même règle elle-même.
 //  Renvoie : { points, laps }  (cache : ne re-télécharge/parse le .fit que si
 //             points est vide — le .fit lui-même n'est jamais re-téléchargé
 //             une fois parsé avec succès).
@@ -12,12 +17,20 @@
 //  contente de le télécharger et de le décoder à la demande (pas à l'import,
 //  pour ne pas payer le coût de parsing sur des activités jamais consultées).
 //  Si l'URL cache a expiré (lien signé côté COROS), on en redemande une
-//  fraîche via le MCP avant d'abandonner.
+//  fraîche via le MCP avant d'abandonner — toujours avec le device_connection
+//  de L'ATHLÈTE (propriétaire de la donnée), jamais celui de l'appelant.
 // =============================================================================
 import { admin, corsHeaders, json, userFromReq } from "../_shared/providers.ts";
 import { decryptConn } from "../_shared/tokenCrypto.ts";
 import { validToken, mcpCall } from "../_shared/corosMcp.ts";
 import { parseFitArrayBuffer } from "../_shared/fitParser.ts";
+
+async function canAccess(sb: any, viewerId: string, ownerId: string): Promise<boolean> {
+  if (viewerId === ownerId) return true;
+  const { data } = await sb.from("coach_athlete")
+    .select("coach_id").eq("coach_id", viewerId).eq("athlete_id", ownerId).eq("status", "active").maybeSingle();
+  return !!data;
+}
 
 async function freshFitUrl(sb: any, userId: string, labelId: string, sportType: number | null): Promise<string | null> {
   if (sportType == null) return null;
@@ -42,8 +55,9 @@ Deno.serve(async (req) => {
     if (!activity_id) return json({ error: "activity_id requis" }, 400);
 
     const { data: act } = await sb.from("external_activities")
-      .select("*").eq("id", activity_id).eq("user_id", user.id).maybeSingle();
+      .select("*").eq("id", activity_id).maybeSingle();
     if (!act) return json({ error: "Activité introuvable" }, 404);
+    if (!(await canAccess(sb, user.id, act.user_id))) return json({ error: "Activité introuvable" }, 404);
     if (act.provider !== "coros") return json({ error: "Détail seconde-par-seconde disponible uniquement pour COROS via cette route" }, 400);
 
     if (act.points) return json({ points: act.points, laps: act.laps ?? [] });
@@ -56,7 +70,7 @@ Deno.serve(async (req) => {
       // Pas encore résolue par coros-poll (quota 50 .fit/jour atteint, ou
       // activité trop ancienne pour le lot courant) : on tente une résolution
       // à la demande plutôt que de forcer l'athlète à attendre le prochain poll.
-      fitUrl = await freshFitUrl(sb, user.id, labelId, sportType);
+      fitUrl = await freshFitUrl(sb, act.user_id, labelId, sportType);
       if (!fitUrl) return json({ error: "Fichier détaillé pas encore disponible côté COROS, réessaie dans quelques minutes" }, 404);
     }
 
@@ -73,7 +87,7 @@ Deno.serve(async (req) => {
     } catch (e) {
       // Lien signé expiré ou invalide : une seule tentative de renouvellement.
       console.warn("coros-activity-streams: retry fit url", labelId, String(e).slice(0, 150));
-      const retryUrl = await freshFitUrl(sb, user.id, labelId, sportType);
+      const retryUrl = await freshFitUrl(sb, act.user_id, labelId, sportType);
       if (!retryUrl) return json({ error: "Fichier .fit introuvable côté COROS" }, 404);
       parsed = await downloadAndParse(retryUrl);
       fitUrl = retryUrl;
