@@ -191,13 +191,18 @@ Deno.serve(async (req) => {
     }
 
     if (action === "resendEmail") {
-      const { userId, type } = p; // 'recovery' | 'invite'
+      const { userId, type, preview } = p; // 'recovery' | 'invite' ; preview: bool (admin-crm "voir la vue de ce compte")
       if (!userId) return json({ error: "userId requis" }, 400);
       const { data: prof, error: pErr } = await sb.from("profiles").select("email").eq("id", userId).single();
       if (pErr || !prof?.email) return json({ error: "Email introuvable pour ce compte" }, 404);
+      // preview=true : redirige vers l'app avec ?adminPreview=1 — sillance-client.js
+      // bascule alors la session Supabase sur sessionStorage (isolée à cet onglet,
+      // jamais dans le localStorage partagé) au lieu de remplacer la session admin
+      // partout sur le domaine (retour Rowan 14/10/2026 : "pas tout me fermer ici").
       const { data, error } = await sb.auth.admin.generateLink({
         type: type === "invite" ? "invite" : "recovery",
         email: prof.email,
+        ...(preview ? { options: { redirectTo: "https://sillance.app/sillance-app.html?adminPreview=1" } } : {}),
       });
       if (error) throw error;
       // NB : sans SMTP custom configuré côté Auth, Supabase peut échouer à
