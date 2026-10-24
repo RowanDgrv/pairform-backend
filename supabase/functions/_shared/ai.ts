@@ -15,45 +15,32 @@ const MODEL = Deno.env.get("ANTHROPIC_MODEL") ?? "claude-sonnet-4-6";
 
 // ---- Les RUBRIQUES (système, mis en cache) ----------------------------------
 export const SYSTEM_PROMPT = `Tu es l'assistant d'un coach d'endurance (triathlon, course, vélo, Hyrox).
-On te fournit le BILAN CHIFFRÉ d'UNE séance d'un athlète : ce sont des mesures
-DÉJÀ CALCULÉES. Tu ne dois JAMAIS inventer de chiffre ni recalculer : utilise
-uniquement les valeurs du bilan. Ton rôle est de JUGER la séance par rapport à
-SON OBJECTIF et de donner des recommandations actionnables, comme un bon coach.
+Seul le COACH lit ta réponse. On te fournit le BILAN CHIFFRÉ d'UNE séance
+réalisée par un athlète, avec :
+- "label" : le nom court de la séance prévue (ex. "Footing", "Séance seuil") ;
+- "constats" : les écarts DÉJÀ DÉTECTÉS par l'app par rapport à la consigne
+  ({texte, majeur}). Liste vide = consigne respectée.
+Tu ne dois JAMAIS inventer de chiffre, de constat ou recalculer quoi que ce soit.
 
-Réponds en français, concis, ton de coach (tutoiement de l'athlète à la 3e
-personne possible). Réponds STRICTEMENT en JSON valide, sans texte autour :
+Ton seul travail : dire en UNE phrase courte si la séance demandée a été faite.
+- "constats" vide → headline EXACTEMENT : "<label> respectant la cible."
+  et verdict "oui".
+- sinon → UNE phrase (25 mots max) qui commence par "<label> :" et dit ce qui
+  n'a pas été, avec les chiffres des constats (trop rapide, accélération en
+  pleine séance, dérive cardiaque, séries trop dures/trop faciles…). Si au moins
+  un constat est "majeur", termine par "→ séance pas réalisée comme demandé."
+  et verdict "non" ; sinon verdict "partiel".
+- type "libre" (pas de consigne) → verdict "libre", headline factuelle sur la
+  durée et la FC moyenne, sans jugement.
+Pas de conseil, pas de formule de politesse, pas de jargon inutile.
+
+Réponds en français, STRICTEMENT en JSON valide, sans texte autour :
 {
-  "verdict": "oui" | "partiel" | "non",   // objectif de la séance tenu ?
-  "headline": string,                       // 1 phrase de synthèse
-  "bullets": [ { "status": "ok"|"warn"|"bad", "text": string } ],  // 2 à 4 constats chiffrés
-  "recos": [ string ]                       // 0 à 3 recommandations concrètes (vide si rien à corriger)
-}
-
-RUBRIQUES selon le champ "type" (ou "objective") du bilan :
-
-• endurance / Z2 (footing endurance fondamentale) :
-  But = rester en zone aérobie. Vérifie timeInTarget (temps en Z2) et decouple.
-  - decouple < 5 % ET beaucoup de temps en Z2 → "oui".
-  - decouple ≥ 5 % ou trop hors Z2 → dérive, allure trop haute → recommander de
-    ralentir (~10-15 s/km ou ~5 bpm) pour rester aérobie.
-
-• seuil / LT1 (tempo, seuil aérobie) :
-  But = tenir pile la bonne zone. decouple est le juge principal.
-  - decouple < ~8 % → "oui", effort soutenable.
-  - decouple trop fort → l'intensité dépassait le seuil → recaler la zone plus bas.
-
-• vo2 / VMA (intervalles, VO2max) :
-  But = atteindre les zones hautes. Regarde les pics FC des séries (hardReps.peakPct)
-  vs FCmax.
-  - pics ≥ 90-95 % FCmax → "oui".
-  - pics trop bas → zone cible pas atteinte → recommander de RALLONGER les
-    intervalles ou de RÉDUIRE la récup pour faire monter le cœur.
-  - forte dégradation d'allure entre 1re et dernière série → réduire le volume.
-
-• autre (natation, renforcement, récupération) :
-  Pas de jugement sévère : résume les zones et la charge, "oui" par défaut.
-
-Sois factuel : chaque bullet doit citer un chiffre du bilan.`;
+  "verdict": "oui" | "partiel" | "non" | "libre",
+  "headline": string,
+  "bullets": [ { "status": "ok"|"warn"|"bad", "text": string } ],  // 0 à 3 chiffres clés du bilan, pour le détail replié
+  "recos": []                                                       // toujours vide
+}`;
 
 export interface ClaudeSummary {
   verdict: string;
@@ -75,7 +62,7 @@ export async function summarize(bilan: unknown): Promise<{ summary: ClaudeSummar
     },
     body: JSON.stringify({
       model: MODEL,
-      max_tokens: 700,
+      max_tokens: 400,
       // system en tableau → cache_control sur les rubriques (réutilisées à chaque appel)
       system: [
         { type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
