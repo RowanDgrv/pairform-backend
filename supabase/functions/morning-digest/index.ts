@@ -109,7 +109,7 @@ Deno.serve(async (req) => {
       .neq("channel", "none");
     if (pErr) throw pErr;
 
-    let sent = 0, skipped = 0;
+    let sent = 0, skipped = 0, failed = 0;
     for (const p of prefs ?? []) {
       const now = localNow(p.tz || "Europe/Paris");
       const inWindow = now.h === p.send_hour && now.m >= p.send_minute && now.m < p.send_minute + 15;
@@ -125,77 +125,93 @@ Deno.serve(async (req) => {
       if (!sessions?.length) { skipped++; continue; }
 
       const lines = sessions.map((s) =>
-        `${DISC_LABEL[s.disc] ?? s.disc} — ${s.title}` +
+        `${DISC_LABEL[s.disc] ?? s.disc} : ${s.title}` +
         ` (${fmtDur(s.dur ?? 0)}${s.zone ? " · " + s.zone : ""})`
       );
       const gear = gearFor(sessions as Session[]);
       const nutri = nutriFor(sessions as Session[]);
       const title = sessions.length > 1
-        ? `Ta journée Sillance — ${sessions.length} séances`
-        : `Ta séance du jour — ${lines[0].split(" — ")[0]}`;
+        ? `Ta journée Sillance : ${sessions.length} séances`
+        : `Ta séance du jour : ${DISC_LABEL[sessions[0].disc] ?? sessions[0].disc}`;
       const bodyTxt = `${lines.join("\n")}\n\nÀ prévoir : ${gear.join(", ")}\n${nutri}`;
 
-      // Email et push sont totalement indépendants (tables et effets de bord
-      // distincts) — parallélisés au lieu d'enchaîner jusqu'à 4 requêtes en
-      // série par utilisateur (constat perf de l'audit 03/08/2026). Toujours
-      // Promise.all (pas allSettled) : une erreur continue d'interrompre le
-      // traitement de cet utilisateur, comportement identique à avant.
-      await Promise.all([
-        (async () => {
-          if (p.channel !== "email" && p.channel !== "both") return;
-          const { data: prof } = await supabase.from("profiles")
-            .select("email, full_name").eq("id", p.user_id).single();
-          if (prof?.email) {
-            await sendEmail({
+      // Un athlète en erreur ne doit jamais bloquer les suivants (avant : une
+      // exception sortait de la boucle → 500 → tous les athlètes restants
+      // perdaient leur rappel du jour, la fenêtre de 15 min étant passée).
+      // `delivered` ne compte que ce qui est VRAIMENT parti : sendEmail renvoie
+      // false sans lever d'erreur quand Resend refuse ou n'est pas configuré
+      // (constaté 27/10/2026 : RESEND_API_KEY absent, la fonction annonçait
+      // sent:1 alors qu'aucun email n'était envoyé).
+      try {
+        const [emailOk, pushOk] = await Promise.all([
+          (async () => {
+            if (p.channel !== "email" && p.channel !== "both") return false;
+            const { data: prof } = await supabase.from("profiles")
+              .select("email, full_name").eq("id", p.user_id).single();
+            if (!prof?.email) return false;
+            return await sendEmail({
               to: prof.email,
               subject: `☀️ ${title}`,
-              html: digestHtml(prof.full_name ?? "champion·ne", lines, gear, nutri),
+              html: digestHtml(prof.full_name || "champion·ne", lines, gear, nutri),
             });
-          }
-        })(),
-        (async () => {
-          if (p.channel !== "push" && p.channel !== "both") return;
-          const { data: subs } = await supabase.from("push_subscriptions")
-            .select("id, endpoint, p256dh, auth, platform").eq("user_id", p.user_id);
-          // Lu côté client au tap (silOnNotificationTap) pour amener directement
-          // l'athlète sur sa vue plutôt que sur l'écran par défaut de l'app.
-          const pushData = { type: "morning_digest" };
-          for (const s of subs ?? []) {
-            if (s.platform === "android") {
-              const r = await sendFcmPush(s.endpoint, { title, body: bodyTxt, data: pushData });
-              if (!r.ok && r.deadToken) await supabase.from("push_subscriptions").delete().eq("id", s.id);
-              continue;
+          })(),
+          (async () => {
+            if (p.channel !== "push" && p.channel !== "both") return false;
+            const { data: subs } = await supabase.from("push_subscriptions")
+              .select("id, endpoint, p256dh, auth, platform").eq("user_id", p.user_id);
+            // Lu côté client au tap (silOnNotificationTap) pour amener directement
+            // l'athlète sur sa vue plutôt que sur l'écran par défaut de l'app.
+            const pushData = { type: "morning_digest" };
+            let ok = false;
+            for (const s of subs ?? []) {
+              if (s.platform === "android") {
+                const r = await sendFcmPush(s.endpoint, { title, body: bodyTxt, data: pushData });
+                if (r.ok) ok = true;
+                else if (r.deadToken) await supabase.from("push_subscriptions").delete().eq("id", s.id);
+                continue;
+              }
+              if (s.platform === "ios") {
+                const r = await sendApnsPush(s.endpoint, { title, body: bodyTxt, data: pushData });
+                if (r.ok) ok = true;
+                else if (r.deadToken) await supabase.from("push_subscriptions").delete().eq("id", s.id);
+                continue;
+              }
+              if (!appServer) continue;
+              try {
+                const subscriber = appServer.subscribe({
+                  endpoint: s.endpoint,
+                  keys: { p256dh: s.p256dh, auth: s.auth },
+                });
+                await subscriber.pushTextMessage(JSON.stringify({
+                  title, body: bodyTxt, url: "./sillance-app.html",
+                }), {});
+                ok = true;
+              } catch (e) {
+                // abonnement mort (navigateur désinscrit) → on le retire
+                const msg = String(e);
+                if (msg.includes("404") || msg.includes("410")) {
+                  await supabase.from("push_subscriptions").delete().eq("id", s.id);
+                } else console.warn("push KO:", s.endpoint.slice(0, 40), msg.slice(0, 120));
+              }
             }
-            if (s.platform === "ios") {
-              const r = await sendApnsPush(s.endpoint, { title, body: bodyTxt, data: pushData });
-              if (!r.ok && r.deadToken) await supabase.from("push_subscriptions").delete().eq("id", s.id);
-              continue;
-            }
-            if (!appServer) continue;
-            try {
-              const subscriber = appServer.subscribe({
-                endpoint: s.endpoint,
-                keys: { p256dh: s.p256dh, auth: s.auth },
-              });
-              await subscriber.pushTextMessage(JSON.stringify({
-                title, body: bodyTxt, url: "./sillance-app.html",
-              }), {});
-            } catch (e) {
-              // abonnement mort (navigateur désinscrit) → on le retire
-              const msg = String(e);
-              if (msg.includes("404") || msg.includes("410")) {
-                await supabase.from("push_subscriptions").delete().eq("id", s.id);
-              } else console.warn("push KO:", s.endpoint.slice(0, 40), msg.slice(0, 120));
-            }
-          }
-        })(),
-      ]);
+            return ok;
+          })(),
+        ]);
 
-      await supabase.from("notification_prefs")
-        .update({ last_sent_on: now.day }).eq("user_id", p.user_id);
-      sent++;
+        if (emailOk || pushOk) {
+          await supabase.from("notification_prefs")
+            .update({ last_sent_on: now.day }).eq("user_id", p.user_id);
+          sent++;
+        } else {
+          failed++;
+          console.warn("morning-digest: rien n'a pu être envoyé à", p.user_id, "canal", p.channel);
+        }
+      } catch (e) {
+        failed++;
+        console.error("morning-digest: erreur pour", p.user_id, e);
+      }
     }
-    return json({ ok: true, sent, skipped });
+    return json({ ok: true, sent, skipped, failed });
   } catch (e) {
     console.error(e);
     return json({ error: "Erreur serveur" }, 500);
@@ -205,7 +221,7 @@ Deno.serve(async (req) => {
 function digestHtml(name: string, lines: string[], gear: string[], nutri: string): string {
   return `
   <div style="font-family:system-ui,Segoe UI,sans-serif;max-width:520px;margin:0 auto;color:#0f1720">
-    <h2 style="font-weight:800">Sillance — ton programme du jour</h2>
+    <h2 style="font-weight:800">Sillance : ton programme du jour</h2>
     <p>Salut ${escapeHtml(name)} ! Voilà ce qui t'attend aujourd'hui :</p>
     <ul style="line-height:1.7">${lines.map((l) => `<li>${escapeHtml(l)}</li>`).join("")}</ul>
     <p style="margin-top:18px"><b>🎒 À prévoir :</b> ${gear.map(escapeHtml).join(" · ")}</p>
