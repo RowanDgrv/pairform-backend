@@ -44,30 +44,49 @@ Deno.serve(async (req) => {
     if (!scheduled_session_id) return json({ error: "scheduled_session_id requis" }, 400);
 
     const { data: session, error: sessErr } = await sb.from("scheduled_sessions")
-      .select("id, athlete_id, date, disc, title, blocks").eq("id", scheduled_session_id).maybeSingle();
+      .select("id, athlete_id, date, disc, title, blocks, coach_note").eq("id", scheduled_session_id).maybeSingle();
     if (sessErr || !session) return json({ error: "Séance introuvable" }, 404);
 
     if (!(await canManage(sb, user.id, session.athlete_id))) {
       return json({ error: "Pas les droits sur cette séance" }, 403);
     }
 
-    const { data: connRow } = await sb.from("device_connections")
-      .select("*").eq("user_id", session.athlete_id).eq("provider", "coros").maybeSingle();
-    if (!connRow) return json({ error: "Cet athlète n'a pas de montre COROS connectée" }, 404);
+    // Codes d'erreur stables (no_coros, polar_unsupported, past_date,
+    // unsupported_sport, empty_session, coros_auth, coros_rejected) : le
+    // front affiche un message clair au lieu de télécharger un fichier.
+    const { data: conns } = await sb.from("device_connections")
+      .select("*").eq("user_id", session.athlete_id);
+    const connRow = (conns ?? []).find((c: any) => c.provider === "coros");
+    if (!connRow) {
+      const hasPolar = (conns ?? []).some((c: any) => c.provider === "polar");
+      return json({ error: hasPolar ? "polar_unsupported" : "no_coros" }, 409);
+    }
+    const target = date || session.date;
+    const parisToday = new Intl.DateTimeFormat("fr-CA", { timeZone: "Europe/Paris" }).format(new Date());
+    if (target < parisToday) return json({ error: "past_date" }, 409);
+    if (session.disc !== "run" && session.disc !== "bike") return json({ error: "unsupported_sport", disc: session.disc }, 409);
     const conn = await decryptConn(connRow);
 
     const { data: ref } = await sb.from("athlete_profiles")
       .select("ftp, pma, cp_bike, vma, cv, seuil_run, css, fc_max").eq("user_id", session.athlete_id).maybeSingle();
 
-    const result = await pushPlannedSession(
-      sb, conn,
-      { disc: session.disc, title: session.title, blocks: session.blocks || [] },
-      date || session.date,
-      ref || {},
-    );
-    return json(result);
+    try {
+      const result = await pushPlannedSession(
+        sb, conn,
+        { disc: session.disc, title: session.title, desc: session.coach_note || "", blocks: session.blocks || [] },
+        target,
+        ref || {},
+      );
+      return json(result);
+    } catch (e) {
+      const msg = String((e as Error)?.message ?? e);
+      console.error("push-session-to-watch:", msg);
+      const code = /séance structurée|aucune section/i.test(msg) ? "empty_session"
+        : /401|403|token|refresh|invalid_grant|unauthor/i.test(msg) ? "coros_auth" : "coros_rejected";
+      return json({ error: code, detail: msg.slice(0, 300) }, 502);
+    }
   } catch (e) {
     console.error(e);
-    return json({ error: String(e).slice(0, 300) }, 400);
+    return json({ error: "server", detail: String(e).slice(0, 300) }, 500);
   }
 });
