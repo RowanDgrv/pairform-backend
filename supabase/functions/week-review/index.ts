@@ -31,10 +31,13 @@ Deno.serve(async (req) => {
 
   try {
     const { athlete_id, week_key, sessions, force } = await req.json();
-    if (!week_key || !Array.isArray(sessions)) {
+    // sessions : ancien format = liste ; nouveau (28/10/2026) = objet
+    // { bilan, fc_max_athlete, seances: [...] } avec le prévu ET le réalisé.
+    const list = Array.isArray(sessions) ? sessions : sessions?.seances;
+    if (!week_key || !Array.isArray(list)) {
       return json({ error: "week_key et sessions requis" }, 400);
     }
-    if (!sessions.length) {
+    if (!list.length) {
       return json({ error: "no_sessions" }, 400);
     }
 
@@ -45,7 +48,7 @@ Deno.serve(async (req) => {
     const authHeader = req.headers.get("Authorization") ?? "";
     const { data: { user } } = await supabase.auth.getUser(authHeader.replace("Bearer ", ""));
     if (!user) return json({ error: "Non authentifié" }, 401);
-    userId = user.id; supa = supabase; ctx = { week_key, athlete_id: athlete_id ?? null, sessions: sessions.length };
+    userId = user.id; supa = supabase; ctx = { week_key, athlete_id: athlete_id ?? null, sessions: list.length };
     stage = "addon";
 
     // --- Gate add-on : jamais décidé côté front ---
