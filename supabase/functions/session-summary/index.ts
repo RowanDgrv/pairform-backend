@@ -16,7 +16,7 @@
 // =============================================================================
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { corsHeaders } from "../_shared/cors.ts";
-import { summarize } from "../_shared/ai.ts";
+import { summarize, aiErrorDetail } from "../_shared/ai.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -74,7 +74,7 @@ Deno.serve(async (req) => {
     return json({ ...summary, model, cached: false });
   } catch (e) {
     console.error(e);
-    return json({ error: "Erreur serveur" }, 500);
+    return json({ error: "ai_failed", detail: aiErrorDetail(e) }, 500);
   }
 });
 

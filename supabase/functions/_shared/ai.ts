@@ -169,3 +169,23 @@ function parseJson(text: string): ClaudeSummary {
     recos: Array.isArray(obj.recos) ? obj.recos : [],
   };
 }
+
+// Cause lisible d'un échec IA, renvoyée au client (jamais la clé ni le
+// prompt) : avant, tout finissait en « Erreur serveur » et rien ne
+// permettait de savoir si c'était la clé, le crédit, le modèle ou la sortie
+// (constat 28/10/2026 : 0 résumé jamais enregistré, add-on actif).
+export function aiErrorDetail(e: unknown): string {
+  const msg = String((e as Error)?.message ?? e ?? "");
+  if (/ANTHROPIC_API_KEY manquant/.test(msg)) return "missing_key";
+  const m = msg.match(/^Anthropic (\d{3}):\s*([\s\S]*)$/);
+  if (m) {
+    const status = m[1];
+    let type = "";
+    try { type = JSON.parse(m[2])?.error?.type ?? ""; } catch { /* corps non JSON */ }
+    if (/credit balance/i.test(m[2])) return "anthropic_credit";
+    return `anthropic_${status}${type ? "_" + type : ""}`;
+  }
+  if (/JSON|Unexpected token|parse/i.test(msg)) return "bad_output";
+  return "unknown";
+}
+
