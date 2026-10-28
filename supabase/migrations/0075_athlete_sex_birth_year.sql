@@ -25,7 +25,7 @@ declare
   ln text := nullif(trim(m->>'last_name'), '');
   rl user_role := coalesce((m->>'role')::user_role, 'athlete');
   sx text := case when m->>'sex' in ('F', 'M', 'X') then m->>'sex' end;
-  by smallint := case when (m->>'birth_year') ~ '^\d{4}$'
+  byr smallint := case when (m->>'birth_year') ~ '^\d{4}$'
                        and (m->>'birth_year')::int between 1900 and extract(year from now())::int
                       then (m->>'birth_year')::smallint end;
 begin
@@ -42,9 +42,9 @@ begin
   )
   on conflict (id) do nothing;
 
-  if rl = 'athlete' and (sx is not null or by is not null) then
+  if rl = 'athlete' and (sx is not null or byr is not null) then
     insert into public.athlete_profiles (user_id, sex, birth_year)
-    values (new.id, sx, by)
+    values (new.id, sx, byr)
     on conflict (user_id) do update set sex = excluded.sex, birth_year = excluded.birth_year;
   end if;
   return new;
