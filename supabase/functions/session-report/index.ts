@@ -1,8 +1,8 @@
 // =============================================================================
 //  Edge Function : session-report (28/10/2026)
-//  Rapport complet d'une séance (consigne « analyste performance » en 7
-//  étapes). L'app envoie un DOSSIER de valeurs déjà calculées (aucun nom,
-//  e-mail ni identifiant ; cycle menstruel seulement s'il est renseigné) ;
+//  Rapport de séance, version allégée : allure vs zones de vitesse, FC vs
+//  FC max, RPE. L'app envoie un DOSSIER de valeurs déjà calculées (aucun nom,
+//  e-mail ni identifiant) ;
 //  l'IA (Groq, Claude en repli) interprète et rédige en JSON structuré.
 //  Mêmes garde-fous que session-summary : add-on IA requis, cache par
 //  coach+séance (pas de double génération), alerte e-mail à l'admin en cas

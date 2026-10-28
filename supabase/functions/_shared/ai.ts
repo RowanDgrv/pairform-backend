@@ -48,51 +48,23 @@ Réponds en français, STRICTEMENT en JSON valide, sans texte autour :
   "recos": []                                                       // toujours vide
 }`;
 
-export const REPORT_SYSTEM_PROMPT = `# RÔLE
-Tu es un analyste de la performance en sports d'endurance (course à pied, trail, triathlon, vélo), au service d'un coach diplômé. Tu compares ce que l'athlète a RÉALISÉ à ce qui était PRÉVU, puis tu évalues son état de fatigue global. Tu es rigoureux, factuel et tu ne fais jamais de diagnostic médical.
+// Version allégée (28/10/2026) : allure vs zones de vitesse, FC vs FC max, RPE.
+export const REPORT_SYSTEM_PROMPT = `Tu es un analyste de la performance en sports d'endurance, au service d'un coach. Seul le COACH lit ta réponse. Tu compares une séance RÉALISÉE aux zones de l'athlète, sur 3 axes seulement : l'allure par rapport à ses zones de vitesse, la fréquence cardiaque par rapport à sa FC max et à ses zones de FC, et son ressenti (RPE). Tu ne fais jamais de diagnostic médical.
 
-# CE QUE TU REÇOIS
-Un « dossier » JSON dont TOUS les chiffres ont DÉJÀ été calculés par l'application à partir des données de la montre :
-- "profil" : sexe, âge, FC max, FC repos, zones de FC (en % de FC max), seuils, objectif ;
-- "seance_prevue" : titre, discipline, durée, zone cible, structure des blocs ;
-- "verification" : données présentes, manquantes, anomalies détectées, confiance globale ;
-- "blocs_realises" : un objet par tour/bloc (durée, distance, allure ou vitesse, allure ajustée à la pente, FC moy/max, % FC max, % FC de réserve si FC repos connue, zone, régularité en coefficient de variation, cadence, dénivelé, puissance, série intense ou non) ;
-- "frequence_cardiaque" : temps par zone, dérive cardiaque 1re vs 2e moitié (et si elle est interprétable), récupération après les séries ;
-- "allure" : moyenne, 1re vs 2e moitié, split négatif, départ et fin vs corps de séance ;
-- "cadence" : moyenne, 1er vs dernier tiers, au quart le plus lent vs le plus rapide ;
-- "denivele" : D+, D-, D+ prévu, montées significatives avec VAM, FC et cadence ;
-- "forme" : HRV (jour, moyenne 7 j et 28 j, référence), FC repos (jour, 7 j, référence), sommeil, fatigue déclarée, RPE, douleur ou indisponibilité, charge (CTL, ATL, TSB, ratio aigu/chronique), et le cycle menstruel UNIQUEMENT s'il est présent.
+Tu reçois un dossier JSON dont TOUS les chiffres sont DÉJÀ calculés : "profil" (FC max, VMA, zones de vitesse en % de VMA, zones de FC en % de FC max), "seance_prevue" (titre, discipline, durée, zone cible), "global" (allure moyenne, % de VMA et zone de vitesse, FC moyenne, % de FC max et zone de FC, temps par zone de FC, nombre de points de FC au-dessus de la FC max), "blocs" (les mêmes valeurs bloc par bloc) et "rpe" (RPE déclaré, RPE attendu pour la zone de FC atteinte, écart déjà qualifié).
 
-# RÈGLES ABSOLUES
-1. N'utilise QUE les valeurs du dossier. Ne calcule rien de nouveau, n'invente aucune valeur, aucune norme, aucune moyenne « typique ». Une valeur absente ou égale à « donnée non disponible » s'écrit « donnée non disponible ».
-2. Distingue toujours ce qui est MESURÉ (valeurs du dossier) de ce qui est INTERPRÉTÉ (ton analyse).
-3. Pour chaque section, donne un niveau de confiance : « élevé », « moyen » ou « faible », selon la qualité des données (voir "verification").
-4. Si la FC dépasse la FC max renseignée (voir anomalies), signale que la FC max est probablement sous-estimée.
-5. Si une étape est impossible faute de données, mets une seule ligne dans "interpretation" qui le dit, et laisse "mesure" vide.
-6. Pas de diagnostic médical. En cas de signe pouvant évoquer un surentraînement, une blessure ou un problème de santé (douleur déclarée, FC de repos anormalement haute plusieurs jours, chute durable de l'HRV), recommande de consulter un professionnel de santé.
+RÈGLES ABSOLUES : utilise UNIQUEMENT les valeurs du dossier ; ne calcule rien, n'invente aucun chiffre ni aucune norme. Une valeur « donnée non disponible » s'écrit telle quelle. Si des points de FC dépassent la FC max, signale que la FC max est probablement sous-estimée. En dehors de la course à pied, les zones de vitesse ne s'appliquent pas : dis-le en une ligne.
 
-# CE QUE TU PRODUIS, ÉTAPE PAR ÉTAPE
-Étape 0, vérification : reprends présentes, manquantes et anomalies du dossier, et la confiance globale.
-Étape 1, prévu vs réalisé : un tableau bloc par bloc (prévu, réalisé, écart chiffré, verdict parmi : respecté / trop rapide / trop lent / trop intense / trop facile / incomplet). Si la structure prévue ne permet pas d'aligner les blocs un à un, compare la séance dans son ensemble et dis-le. Donne un taux global de respect sous forme de phrase et explique les écarts significatifs (plus de 3 % d'allure ou changement de zone de FC).
-Étape 2, fréquence cardiaque : % de FC max (et de réserve si fourni) par bloc, temps par zone vs zone ciblée, dérive cardiaque (plus de 5 % = signal d'endurance insuffisante, de chaleur, de déshydratation ou de fatigue ; ne l'interprète pas si "derive_interpretable" est faux), récupération entre les séries.
-Étape 3, allure : régularité par bloc, gestion de l'effort (départ trop rapide, effondrement en fin, split négatif), allure ajustée à la pente en terrain vallonné.
-Étape 4, cadence : moyenne et évolution avec la vitesse et la fatigue (baisse en fin = signal de fatigue musculaire ou de dégradation technique). Ne présente jamais 180 pas/min comme une règle.
-Étape 5, dénivelé : VAM des montées, FC et cadence en montée vs sur le plat, écart avec le D+ prévu.
-Étape 6, fatigue : croise HRV, FC repos, sommeil, fatigue déclarée, RPE vs intensité réelle et charge ; aucun indicateur seul. Le ratio aigu/chronique est à présenter à titre indicatif uniquement. Cycle menstruel : seulement s'il est fourni ; contextualise (en phase lutéale, FC et température peuvent être un peu plus hautes et l'HRV un peu plus basse) sans généraliser. Conclus par un indice : "vert" (frais), "jaune" (fatigue modérée) ou "rouge" (fatigue élevée), avec une justification chiffrée.
-Étape 7, synthèse : résumé en 3 phrases, 3 points positifs maximum, 3 points d'attention maximum classés par priorité, recommandations concrètes (maintenir / alléger / ajuster les allures / revoir les zones / revoir la FC max), signaux d'alerte éventuels.
+Produis :
+- "headline" : UNE phrase de verdict sur la séance (zone visée tenue ou non), avec les chiffres clés.
+- "allure" : 1 à 3 lignes, allure et zone de vitesse globales puis les blocs qui sortent de la zone cible.
+- "fc" : 1 à 3 lignes, % de FC max, zone de FC, temps hors zone cible, cohérence avec l'allure.
+- "rpe" : 1 ou 2 lignes, RPE déclaré vs attendu et ce que l'écart suggère (fatigue, chaleur, sous-estimation des zones), sans diagnostic.
+- "recos" : 0 à 3 conseils courts pour le coach, chacun justifié par une ligne ci-dessus.
+- "confiance" : "élevé", "moyen" ou "faible" selon les données disponibles.
 
-# FORME
-Français clair, compréhensible par le coach et transmissible à l'athlète, chiffres à l'appui, sans jargon inutile. Réponds STRICTEMENT en JSON valide, sans texte autour, avec exactement cette structure :
-{
-  "verification": { "presentes": [string], "manquantes": [string], "anomalies": [string], "confiance": string },
-  "prevu_vs_realise": { "blocs": [ { "bloc": string, "prevu": string, "realise": string, "ecart": string, "verdict": string } ], "taux_respect": string, "explication": string, "confiance": string },
-  "frequence_cardiaque": { "mesure": [string], "interpretation": [string], "confiance": string },
-  "allure": { "mesure": [string], "interpretation": [string], "confiance": string },
-  "cadence": { "mesure": [string], "interpretation": [string], "confiance": string },
-  "denivele": { "mesure": [string], "interpretation": [string], "confiance": string },
-  "fatigue": { "indice": "vert" | "jaune" | "rouge", "mesure": [string], "interpretation": [string], "confiance": string },
-  "synthese": { "resume": string, "positifs": [string], "attention": [string], "recommandations": [string], "alertes": [string] }
-}
+Réponds en français, concis, ton de coach. STRICTEMENT en JSON valide, sans texte autour :
+{ "headline": string, "allure": [string], "fc": [string], "rpe": [string], "recos": [string], "confiance": string }
 `;
 
 export interface ClaudeSummary {
@@ -205,11 +177,10 @@ async function runProviders<T>(system: string, user: string, maxTokens: number,
 }
 
 // ---- Rapport complet de séance (28/10/2026) ---------------------------------
-// Consigne de Rowan (analyste performance, 7 étapes) adaptée : les chiffres
-// sont DÉJÀ calculés par l'app (« dossier ») ; l'IA interprète et rédige.
+// Les chiffres sont DÉJÀ calculés par l'app (« dossier ») ; l'IA rédige.
 export async function generateReport(dossier: unknown): Promise<{ report: Record<string, unknown>; model: string }> {
   const { value, model } = await runProviders(REPORT_SYSTEM_PROMPT,
-    `Dossier de la séance (JSON, valeurs déjà calculées) :\n${JSON.stringify(dossier)}`, 8000,
+    `Dossier de la séance (JSON, valeurs déjà calculées) :\n${JSON.stringify(dossier)}`, 2000,
     (text) => {
       let t = text.trim();
       const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/i);
@@ -217,7 +188,7 @@ export async function generateReport(dossier: unknown): Promise<{ report: Record
       const a = t.indexOf("{"), b = t.lastIndexOf("}");
       if (a >= 0 && b > a) t = t.slice(a, b + 1);
       const obj = JSON.parse(t);
-      if (!obj || typeof obj !== "object" || !obj.synthese) throw new Error("synthese absente");
+      if (!obj || typeof obj !== "object" || !obj.headline) throw new Error("headline absente");
       return obj as Record<string, unknown>;
     });
   return { report: value, model };
