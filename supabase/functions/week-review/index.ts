@@ -17,10 +17,17 @@
 // =============================================================================
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { corsHeaders } from "../_shared/cors.ts";
+import { alertAiFailure } from "../_shared/aiAlert.ts";
 import { summarizeWeek, aiErrorDetail } from "../_shared/ai.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  // Étape en cours + contexte : repris dans l'alerte email si ça plante.
+  let stage = "unknown";
+  let userId: string | null = null;
+  let ctx: Record<string, unknown> = {};
+  // deno-lint-ignore no-explicit-any
+  let supa: any = null;
 
   try {
     const { athlete_id, week_key, sessions, force } = await req.json();
@@ -38,6 +45,8 @@ Deno.serve(async (req) => {
     const authHeader = req.headers.get("Authorization") ?? "";
     const { data: { user } } = await supabase.auth.getUser(authHeader.replace("Bearer ", ""));
     if (!user) return json({ error: "Non authentifié" }, 401);
+    userId = user.id; supa = supabase; ctx = { week_key, athlete_id: athlete_id ?? null, sessions: sessions.length };
+    stage = "addon";
 
     // --- Gate add-on : jamais décidé côté front ---
     const { data: ok, error: gErr } = await supabase.rpc("has_ai_addon", { uid: user.id });
@@ -47,6 +56,7 @@ Deno.serve(async (req) => {
     // --- Cache : déjà généré pour cette semaine+athlète ? ---
     // (.eq("athlete_id", null) ne matcherait jamais une colonne NULL en SQL —
     // il faut .is() dans ce cas précis, cf. bug identique évité ici.)
+    stage = "cache";
     if (!force) {
       let q = supabase
         .from("week_reviews")
@@ -58,7 +68,8 @@ Deno.serve(async (req) => {
       if (cached) return json({ ...cached, cached: true });
     }
 
-    // --- Appel Claude (prompt caching côté lib) ---
+    // --- Appel IA (Groq, Claude en repli) ---
+    stage = "ia";
     const { summary, model } = await summarizeWeek(sessions);
 
     // --- Persiste (upsert sur coach_id+athlete_id+week_key) → pas de double facturation ---
@@ -73,12 +84,17 @@ Deno.serve(async (req) => {
       recos: summary.recos,
       model,
     }, { onConflict: "coach_id,athlete_id,week_key" });
+    if (upErr) {
+      await alertAiFailure(supabase, { fn: "week-review", stage: "save", userId, detail: "save_failed", error: upErr, context: ctx });
+    }
     if (upErr) console.error("[week-review] upsert:", upErr);
 
     return json({ ...summary, model, cached: false });
   } catch (e) {
     console.error(e);
-    return json({ error: "ai_failed", detail: aiErrorDetail(e) }, 500);
+    const detail = aiErrorDetail(e);
+    if (supa) await alertAiFailure(supa, { fn: "week-review", stage, userId, detail, error: e, context: ctx });
+    return json({ error: "ai_failed", detail }, 500);
   }
 });
 

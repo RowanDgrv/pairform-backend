@@ -9,9 +9,15 @@
 //  le petit payload dynamique est facturé plein tarif. Voir le plan financier.
 // =============================================================================
 
+// Fournisseurs (28/10/2026) : Groq en principal (offre gratuite, données ni
+// conservées ni utilisées pour l'entraînement), Claude en repli. AI_PROVIDER
+// = "anthropic" inverse l'ordre. Un fournisseur sans clé est simplement sauté.
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
-// Sonnet 4.6 par défaut (qualité du verdict) ; surchargble via env pour Haiku.
-const MODEL = Deno.env.get("ANTHROPIC_MODEL") ?? "claude-sonnet-4-6";
+const ANTHROPIC_MODEL = Deno.env.get("ANTHROPIC_MODEL") ?? "claude-sonnet-4-6";
+const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
+// llama-3.3-70b-versatile retiré de l'offre gratuite Groq le 16/08/2026 ;
+// gpt-oss-120b est le remplaçant recommandé. Surchargeable sans redéployer.
+const GROQ_MODEL = Deno.env.get("GROQ_MODEL") ?? "openai/gpt-oss-120b";
 
 // ---- Les RUBRIQUES (système, mis en cache) ----------------------------------
 export const SYSTEM_PROMPT = `Tu es l'assistant d'un coach d'endurance (triathlon, course, vélo, Hyrox).
@@ -50,40 +56,7 @@ export interface ClaudeSummary {
 }
 
 export async function summarize(bilan: unknown): Promise<{ summary: ClaudeSummary; model: string }> {
-  const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
-  if (!apiKey) throw new Error("ANTHROPIC_API_KEY manquant");
-
-  const res = await fetch(ANTHROPIC_URL, {
-    method: "POST",
-    headers: {
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      model: MODEL,
-      max_tokens: 400,
-      // system en tableau → cache_control sur les rubriques (réutilisées à chaque appel)
-      system: [
-        { type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
-      ],
-      messages: [
-        {
-          role: "user",
-          content: `Bilan chiffré de la séance (JSON) :\n${JSON.stringify(bilan)}`,
-        },
-      ],
-    }),
-  });
-
-  if (!res.ok) {
-    const txt = await res.text();
-    throw new Error(`Anthropic ${res.status}: ${txt}`);
-  }
-  const data = await res.json();
-  const text: string = data?.content?.[0]?.text ?? "";
-  const summary = parseJson(text);
-  return { summary, model: MODEL };
+  return await generate(SYSTEM_PROMPT, `Bilan chiffré de la séance (JSON) :\n${JSON.stringify(bilan)}`, 1200);
 }
 
 // ---- Synthèse HEBDOMADAIRE (07/10/2026) : même esprit que SYSTEM_PROMPT
@@ -119,39 +92,86 @@ Sois factuel : chaque bullet doit citer un chiffre de la liste fournie.`;
 export async function summarizeWeek(
   sessions: unknown[],
 ): Promise<{ summary: ClaudeSummary; model: string }> {
-  const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
-  if (!apiKey) throw new Error("ANTHROPIC_API_KEY manquant");
+  return await generate(WEEK_SYSTEM_PROMPT, `Séances réalisées cette semaine (JSON) :\n${JSON.stringify(sessions)}`, 2000);
+}
 
+// ---- Appel multi-fournisseur ------------------------------------------------
+type Provider = "groq" | "anthropic";
+export interface AiAttempt { provider: Provider; model: string; error: string }
+// Échec de TOUS les fournisseurs : garde le détail de chaque tentative, pour
+// la fenêtre d'erreur côté app et l'email d'alerte (où et pourquoi ça a planté).
+export class AiError extends Error {
+  attempts: AiAttempt[];
+  constructor(attempts: AiAttempt[]) {
+    super(attempts.length ? attempts.map((a) => `${a.provider}: ${a.error}`).join(" | ") : "Aucun fournisseur IA configuré");
+    this.attempts = attempts;
+  }
+}
+
+function providerOrder(): Provider[] {
+  const order: Provider[] = (Deno.env.get("AI_PROVIDER") ?? "groq") === "anthropic"
+    ? ["anthropic", "groq"] : ["groq", "anthropic"];
+  return order.filter((p) => !!Deno.env.get(p === "groq" ? "GROQ_API_KEY" : "ANTHROPIC_API_KEY"));
+}
+
+async function generate(system: string, user: string, maxTokens: number): Promise<{ summary: ClaudeSummary; model: string }> {
+  const attempts: AiAttempt[] = [];
+  for (const p of providerOrder()) {
+    const model = p === "groq" ? GROQ_MODEL : ANTHROPIC_MODEL;
+    try {
+      const text = p === "groq" ? await callGroq(system, user, maxTokens) : await callAnthropic(system, user, maxTokens);
+      let summary: ClaudeSummary;
+      try { summary = parseJson(text); }
+      catch { throw new Error(`bad_output: ${text.slice(0, 200)}`); }
+      if (!summary.headline) throw new Error(`bad_output: headline vide`);
+      return { summary, model: `${p}:${model}` };
+    } catch (e) {
+      attempts.push({ provider: p, model, error: String((e as Error)?.message ?? e).slice(0, 600) });
+    }
+  }
+  throw new AiError(attempts);
+}
+
+async function callGroq(system: string, user: string, maxTokens: number): Promise<string> {
+  const res = await fetch(GROQ_URL, {
+    method: "POST",
+    headers: { "Authorization": `Bearer ${Deno.env.get("GROQ_API_KEY")}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      model: GROQ_MODEL,
+      // gpt-oss raisonne avant de répondre : la marge de tokens couvre ce
+      // raisonnement + le JSON. Tâche simple → effort faible (plus rapide).
+      max_completion_tokens: maxTokens,
+      reasoning_effort: "low",
+      response_format: { type: "json_object" },
+      messages: [{ role: "system", content: system }, { role: "user", content: user }],
+    }),
+    signal: AbortSignal.timeout(30000),
+  });
+  if (!res.ok) throw new Error(`Groq ${res.status}: ${(await res.text()).slice(0, 400)}`);
+  const data = await res.json();
+  return data?.choices?.[0]?.message?.content ?? "";
+}
+
+async function callAnthropic(system: string, user: string, maxTokens: number): Promise<string> {
   const res = await fetch(ANTHROPIC_URL, {
     method: "POST",
     headers: {
-      "x-api-key": apiKey,
+      "x-api-key": Deno.env.get("ANTHROPIC_API_KEY")!,
       "anthropic-version": "2023-06-01",
       "content-type": "application/json",
     },
     body: JSON.stringify({
-      model: MODEL,
-      max_tokens: 800,
-      system: [
-        { type: "text", text: WEEK_SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
-      ],
-      messages: [
-        {
-          role: "user",
-          content: `Séances réalisées cette semaine (JSON) :\n${JSON.stringify(sessions)}`,
-        },
-      ],
+      model: ANTHROPIC_MODEL,
+      max_tokens: maxTokens,
+      // system en tableau → cache_control sur les rubriques (réutilisées à chaque appel)
+      system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
+      messages: [{ role: "user", content: user }],
     }),
+    signal: AbortSignal.timeout(30000),
   });
-
-  if (!res.ok) {
-    const txt = await res.text();
-    throw new Error(`Anthropic ${res.status}: ${txt}`);
-  }
+  if (!res.ok) throw new Error(`Anthropic ${res.status}: ${(await res.text()).slice(0, 400)}`);
   const data = await res.json();
-  const text: string = data?.content?.[0]?.text ?? "";
-  const summary = parseJson(text);
-  return { summary, model: MODEL };
+  return data?.content?.[0]?.text ?? "";
 }
 
 // Claude renvoie du JSON ; on tolère un éventuel bloc ```json … ```.
@@ -175,17 +195,22 @@ function parseJson(text: string): ClaudeSummary {
 // permettait de savoir si c'était la clé, le crédit, le modèle ou la sortie
 // (constat 28/10/2026 : 0 résumé jamais enregistré, add-on actif).
 export function aiErrorDetail(e: unknown): string {
-  const msg = String((e as Error)?.message ?? e ?? "");
-  if (/ANTHROPIC_API_KEY manquant/.test(msg)) return "missing_key";
-  const m = msg.match(/^Anthropic (\d{3}):\s*([\s\S]*)$/);
-  if (m) {
-    const status = m[1];
-    let type = "";
-    try { type = JSON.parse(m[2])?.error?.type ?? ""; } catch { /* corps non JSON */ }
-    if (/credit balance/i.test(m[2])) return "anthropic_credit";
-    return `anthropic_${status}${type ? "_" + type : ""}`;
+  if (e instanceof AiError) {
+    if (!e.attempts.length) return "missing_key";
+    return e.attempts.map((a) => attemptCode(a.error)).join("+");
   }
-  if (/JSON|Unexpected token|parse/i.test(msg)) return "bad_output";
+  return attemptCode(String((e as Error)?.message ?? e ?? ""));
+}
+function attemptCode(msg: string): string {
+  const m = msg.match(/^(Anthropic|Groq) (\d{3}):\s*([\s\S]*)$/);
+  if (m) {
+    const who = m[1].toLowerCase(), status = m[2];
+    if (/credit balance/i.test(m[3])) return `${who}_credit`;
+    let type = "";
+    try { const j = JSON.parse(m[3]); type = j?.error?.type ?? j?.error?.code ?? ""; } catch { /* corps tronqué */ }
+    return `${who}_${status}${type ? "_" + type : ""}`;
+  }
+  if (/^bad_output/.test(msg)) return "bad_output";
+  if (/timed out|TimeoutError|aborted/i.test(msg)) return "timeout";
   return "unknown";
 }
-
