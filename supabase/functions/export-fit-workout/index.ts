@@ -150,13 +150,15 @@ function pushBlockSteps(steps: Record<string, unknown>[], block: Block) {
 
 function buildFitWorkout(session: SessionInput): Uint8Array {
   const encoder = new Encoder();
+  // Les types publiés du SDK FIT (Mesg) ne listent pas les champs par message ;
+  // l'encodeur les accepte bien à l'exécution. Cast assumé, sans effet runtime.
   encoder.onMesg(Profile.MesgNum.FILE_ID, {
     type: "workout",
     manufacturer: "development",
     product: 0,
     timeCreated: new Date(),
     serialNumber: Math.floor(Math.random() * 0xffffffff),
-  });
+  } as unknown as Parameters<typeof encoder.onMesg>[1]);
 
   const steps: Record<string, unknown>[] = [];
   for (const block of session.blocks || []) pushBlockSteps(steps, block);
@@ -168,8 +170,8 @@ function buildFitWorkout(session: SessionInput): Uint8Array {
     sport: SPORT_BY_DISC[session.disc || "run"] || "running",
     numValidSteps: steps.length,
     wktName: (session.title || "Séance Sillance").slice(0, 30),
-  });
-  for (const step of steps) encoder.onMesg(Profile.MesgNum.WORKOUT_STEP, step);
+  } as unknown as Parameters<typeof encoder.onMesg>[1]);
+  for (const step of steps) encoder.onMesg(Profile.MesgNum.WORKOUT_STEP, step as unknown as Parameters<typeof encoder.onMesg>[1]);
 
   return encoder.close();
 }

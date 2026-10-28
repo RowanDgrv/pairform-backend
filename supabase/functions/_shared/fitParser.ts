@@ -130,7 +130,7 @@ export function parseFitArrayBuffer(buf: ArrayBuffer): { points: FitPoint[]; lap
     if (!def) break; // message inconnu sans définition préalable : on ne peut pas avancer en sécurité
 
     if (tsOffset != null && lastTimestamp != null) {
-      let ts = (lastTimestamp & ~0x1F) | tsOffset;
+      let ts: number = (lastTimestamp & ~0x1F) | tsOffset;
       if (ts < lastTimestamp) ts += 0x20;
       lastTimestamp = ts;
     }

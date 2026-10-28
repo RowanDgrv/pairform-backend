@@ -39,9 +39,13 @@ Deno.serve(async (req) => {
     if (membership.tier !== "coach") {
       return json({ error: "Seules les adhésions « Coaching + » se assignent à un coach" }, 400);
     }
-    if (membership.clubs?.owner_id !== user.id) return json({ error: "Non autorisé" }, 403);
+    // supabase-js type les jointures comme des tableaux ; à l'exécution une
+    // jointure many-to-one renvoie un objet. On accepte les deux formes.
+    const one = <T>(v: T | T[] | null | undefined): T | undefined => (Array.isArray(v) ? v[0] : v ?? undefined);
+    const club = one(membership.clubs);
+    if (club?.owner_id !== user.id) return json({ error: "Non autorisé" }, 403);
 
-    const athleteId = membership.club_members?.athlete_id;
+    const athleteId = one(membership.club_members)?.athlete_id;
     if (!athleteId) {
       return json({ error: "Ce membre n'a pas encore de compte Sillance" }, 400);
     }
@@ -85,7 +89,7 @@ Deno.serve(async (req) => {
       if (!existing) {
         const { error: insErr } = await supabase.from("coach_athlete").insert({
           coach_id, athlete_id: athleteId, status: "active",
-          role_label: `Club : ${membership.clubs?.name ?? ""}`.trim(),
+          role_label: `Club : ${club?.name ?? ""}`.trim(),
           source_club_membership_id: membership_id,
         });
         if (insErr) throw insErr;
