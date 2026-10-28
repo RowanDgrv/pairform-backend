@@ -90,6 +90,11 @@ Deno.serve(async (req) => {
       return json({ users: await listUsers(sb) });
     }
 
+    // Mesure d'audience (0078) : agrégats pour sillance-stats.html.
+    if (action === "audience") {
+      return json(await audience(sb, Number(p.days) || 30));
+    }
+
     // setPlan couvre plan ET palier en un seul appel (la page admin les
     // présente comme un seul choix : "Coach solo · 29€/mois", pas deux
     // contrôles séparés à synchroniser à la main). S'il n'existe encore
@@ -218,3 +223,98 @@ Deno.serve(async (req) => {
     return json({ error: "Erreur serveur", detail: String(e).slice(0, 200) }, 500);
   }
 });
+
+
+/* ===================== Mesure d'audience (28/10/2026) =====================
+   Agrège pageviews (0078) côté serveur : la page stats ne reçoit que des
+   comptes, jamais les lignes. Une « visite » = un visit_id (aléatoire, durée
+   de l'onglet). Les lignes d'avant 0078 n'ont pas de visit_id : comptées
+   comme une visite par page vue et signalées à part (legacy).            */
+type PV = { created_at: string; path: string; referrer_host: string | null; event: string; label: string | null; visit_id: string | null; src: string | null };
+
+function sourceOf(r: PV): string {
+  if (r.src) return r.src;
+  const h = (r.referrer_host || "").toLowerCase();
+  if (!h) return "direct / inconnu";
+  if (h.includes("linkedin") || h === "lnkd.in") return "linkedin";
+  if (h.includes("instagram")) return "instagram";
+  if (h.includes("facebook") || h === "l.facebook.com") return "facebook";
+  if (h.includes("google")) return h.includes("android.gm") ? "gmail" : "google";
+  if (h.includes("bing") || h.includes("duckduckgo") || h.includes("qwant") || h.includes("ecosia")) return "moteur de recherche";
+  if (h.includes("t.co") || h.includes("twitter") || h.includes("x.com")) return "x / twitter";
+  return h;
+}
+const parisDay = (iso: string) => new Intl.DateTimeFormat("fr-CA", { timeZone: "Europe/Paris" }).format(new Date(iso));
+const isHome = (p: string) => p === "/" || p === "/index.html";
+
+async function audience(sb: ReturnType<typeof admin>, daysIn: number) {
+  const days = Math.min(Math.max(Math.round(daysIn), 1), 400);
+  const from = new Date(Date.now() - days * 86400000).toISOString();
+  const rows: PV[] = [];
+  for (let off = 0; off < 200000; off += 1000) {
+    const { data, error } = await sb.from("pageviews")
+      .select("created_at, path, referrer_host, event, label, visit_id, src")
+      .gte("created_at", from).order("created_at", { ascending: true }).range(off, off + 999);
+    if (error) throw error;
+    rows.push(...(data as PV[]));
+    if (!data || data.length < 1000) break;
+  }
+
+  // visites : regroupement par visit_id ; legacy = 1 visite par page vue
+  const visits = new Map<string, PV[]>();
+  let legacy = 0;
+  rows.forEach((r, i) => {
+    const k = r.visit_id ?? `legacy-${i}`;
+    if (!r.visit_id) { if (r.event !== "view") return; legacy++; }
+    (visits.get(k) ?? visits.set(k, []).get(k)!).push(r);
+  });
+
+  const daily = new Map<string, { views: number; visits: Set<string> }>();
+  rows.forEach((r, i) => {
+    if (r.event !== "view") return;
+    const d = parisDay(r.created_at);
+    const e = daily.get(d) ?? daily.set(d, { views: 0, visits: new Set() }).get(d)!;
+    e.views++; e.visits.add(r.visit_id ?? `legacy-${i}`);
+  });
+
+  type Src = { source: string; visits: number; home: number; read50: number; ctaApp: number; app: number; signup: number };
+  const bySrc = new Map<string, Src>();
+  const funnel = { visits: 0, home: 0, read50: 0, ctaApp: 0, app: 0, signup: 0 };
+  const scroll: Record<string, number> = { "25": 0, "50": 0, "75": 0, "100": 0 };
+  const clicks = new Map<string, number>();
+  const pages = new Map<string, number>();
+
+  for (const [k, list] of visits) {
+    const first = list.find((r) => r.event === "view") ?? list[0];
+    const tracked = !k.startsWith("legacy-");
+    const src = sourceOf(list.find((r) => r.src) ?? first);
+    const e = bySrc.get(src) ?? bySrc.set(src, { source: src, visits: 0, home: 0, read50: 0, ctaApp: 0, app: 0, signup: 0 }).get(src)!;
+    const home = list.some((r) => r.event === "view" && isHome(r.path));
+    const read50 = list.some((r) => r.event === "scroll" && isHome(r.path) && Number(r.label) >= 50);
+    const ctaApp = list.some((r) => r.event === "click" && (r.label ?? "").includes("sillance-app"));
+    const app = list.some((r) => r.event === "view" && r.path === "/sillance-app.html");
+    const signup = list.some((r) => r.event === "signup");
+    e.visits++; funnel.visits++;
+    if (home) { e.home++; funnel.home++; }
+    if (tracked && read50) { e.read50++; funnel.read50++; }
+    if (tracked && ctaApp) { e.ctaApp++; funnel.ctaApp++; }
+    if (app) { e.app++; funnel.app++; }
+    if (signup) { e.signup++; funnel.signup++; }
+    const depths = new Set(list.filter((r) => r.event === "scroll" && isHome(r.path)).map((r) => r.label ?? ""));
+    depths.forEach((d) => { if (d in scroll) scroll[d]++; });
+  }
+  rows.forEach((r) => {
+    if (r.event === "click" && r.label) { const key = `${r.path} → ${r.label}`; clicks.set(key, (clicks.get(key) ?? 0) + 1); }
+    if (r.event === "view") pages.set(r.path, (pages.get(r.path) ?? 0) + 1);
+  });
+
+  return {
+    days, from,
+    totals: { views: rows.filter((r) => r.event === "view").length, visits: visits.size, legacyVisits: legacy, events: rows.length },
+    daily: [...daily.entries()].sort().map(([day, v]) => ({ day, views: v.views, visits: v.visits.size })),
+    sources: [...bySrc.values()].sort((a, b) => b.visits - a.visits),
+    funnel, scroll,
+    clicks: [...clicks.entries()].sort((a, b) => b[1] - a[1]).slice(0, 25).map(([what, n]) => ({ what, n })),
+    pages: [...pages.entries()].sort((a, b) => b[1] - a[1]).slice(0, 15).map(([path, n]) => ({ path, n })),
+  };
+}

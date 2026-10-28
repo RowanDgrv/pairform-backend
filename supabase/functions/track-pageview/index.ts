@@ -1,10 +1,11 @@
 // =============================================================================
 //  Edge Function : track-pageview
 //  Mesure d'audience anonyme (catégorie "analytics" du bandeau cookies).
-//  Appelée uniquement si l'utilisateur a accepté cette catégorie
-//  (sillance-cookies.js, window.SilCookies.has('analytics')) — jamais par
-//  défaut. Ne reçoit et ne stocke aucune donnée personnelle : ni IP, ni
-//  user_id, ni identifiant visiteur. Body : { path, referrer_host, lang }.
+//  Mesure exemptée de consentement depuis 0078 (28/10/2026) : envoyée par
+//  défaut, jamais si le visiteur a refusé dans le bandeau (opposition).
+//  Ne reçoit et ne stocke aucune donnée personnelle : ni IP, ni user_id, ni
+//  identifiant persistant (visit_id = aléatoire, durée de l'onglet).
+//  Body : { path, referrer_host, lang, event?, label?, visit_id?, src? }.
 // =============================================================================
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { corsHeaders } from "../_shared/cors.ts";
@@ -34,12 +35,19 @@ Deno.serve(async (req) => {
     }
 
     const lang = ALLOWED_LANGS.includes(body.lang) ? body.lang : null;
+    // 0078 : événements, visite et source. Formats fermés : rien de libre,
+    // rien de personnel ne peut passer (pas de texte saisi, pas d'email).
+    const pick = (v: unknown, re: RegExp) => (typeof v === "string" && re.test(v) ? v : null);
+    const event = pick(body.event, /^[a-z0-9_]{1,30}$/) ?? "view";
+    const label = pick(body.label, /^[A-Za-z0-9_.\-\/#?=&]{1,80}$/);
+    const visitId = pick(body.visit_id, /^[a-z0-9]{8,32}$/);
+    const src = pick(typeof body.src === "string" ? body.src.toLowerCase() : null, /^[a-z0-9_-]{1,30}$/);
 
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
-    const { error } = await supabase.from("pageviews").insert({ path, referrer_host: referrerHost, lang });
+    const { error } = await supabase.from("pageviews").insert({ path, referrer_host: referrerHost, lang, event, label, visit_id: visitId, src });
     if (error) throw error;
 
     return json({ ok: true });
