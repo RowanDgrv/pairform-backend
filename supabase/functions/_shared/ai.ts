@@ -137,15 +137,17 @@ Ce que tu produis :
   fractionnée, FC absente ou hors plan, "bad" si non réalisée.
 - "headline" : UNE phrase sur la semaine qui reprend les compteurs du "bilan"
   (ex. « 3 séances réalisées sur 4 prévues à date, zones d'endurance respectées. »).
-- "verdict" : "oui" si toutes les séances prévues à date sont réalisées sans
-  écart de zone ; "non" si moins de la moitié sont réalisées ; sinon "partiel".
+- "verdict" : "libre" si "seances_prevues_a_date" vaut 0 (aucun plan à juger :
+  la headline le dit, sans parler d'objectif tenu) ; sinon "oui" si toutes les
+  séances prévues à date sont réalisées sans écart de zone ; "non" si moins de
+  la moitié sont réalisées ; sinon "partiel".
 - "recos" : 0 à 3 conseils courts pour la suite, chacun justifié par une
   ligne ci-dessus. Aucune reco générique.
 
 Réponds en français, ton de coach, concis. STRICTEMENT en JSON valide, sans
 texte autour :
 {
-  "verdict": "oui" | "partiel" | "non",
+  "verdict": "oui" | "partiel" | "non" | "libre",
   "headline": string,
   "bullets": [ { "status": "ok"|"warn"|"bad", "text": string } ],
   "recos": [ string ]
