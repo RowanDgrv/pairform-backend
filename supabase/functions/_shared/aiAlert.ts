@@ -24,6 +24,7 @@ const STAGE_LABEL: Record<string, string> = {
 const FN_LABEL: Record<string, string> = {
   "session-summary": "Analyse d'une séance",
   "week-review": "Analyse de la semaine",
+  "session-report": "Rapport complet de séance",
 };
 
 function adminEmails(): string[] {
