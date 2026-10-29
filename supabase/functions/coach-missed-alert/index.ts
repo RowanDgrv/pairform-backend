@@ -29,16 +29,11 @@ import { corsHeaders } from "../_shared/cors.ts";
 import { sendFcmPush } from "../_shared/fcm.ts";
 import { sendApnsPush } from "../_shared/apns.ts";
 import { sendEmail } from "../_shared/email.ts";
+import { addDays, computeSignals } from "../_shared/athleteSignals.ts";
 
 const SEND_HOUR = 9; // Europe/Paris
 const LOOKBACK_DAYS = 21;
 const TZ = "Europe/Paris";
-
-/* familles de sport pour rapprocher séance prévue et activité montre */
-const FAMILY: Record<string, string[]> = {
-  swim: ["swim"], bike: ["bike"], run: ["run"], strength: ["strength"],
-  tri: ["swim", "bike", "run"], hyrox: ["run", "strength", "hyrox"],
-};
 
 function parisParts(d: Date): { h: number; day: string } {
   const parts = new Intl.DateTimeFormat("fr-CA", {
@@ -46,11 +41,6 @@ function parisParts(d: Date): { h: number; day: string } {
   }).formatToParts(d);
   const g = (t: string) => parts.find((p) => p.type === t)?.value ?? "0";
   return { h: +g("hour") % 24, day: `${g("year")}-${g("month")}-${g("day")}` };
-}
-function addDays(iso: string, n: number): string {
-  const d = new Date(iso + "T00:00:00Z");
-  d.setUTCDate(d.getUTCDate() + n);
-  return d.toISOString().slice(0, 10);
 }
 function dayLabel(iso: string): string {
   return new Date(iso + "T12:00:00Z").toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" });
@@ -133,49 +123,22 @@ Deno.serve(async (req) => {
   }
 });
 
-/* Séries de séances manquées, par athlète actif du coach, non encore signalées. */
+/* Séries de séances manquées, par athlète actif du coach, non encore signalées.
+   Calcul commun avec l'écran « Qui a besoin de toi » (_shared/athleteSignals.ts). */
 async function findMissed(supabase: SupabaseClient, coachId: string, threshold: number, today: string): Promise<Missed[]> {
   const { data: roster } = await supabase.from("coach_athlete")
     .select("athlete_id").eq("coach_id", coachId).eq("status", "active");
   const ids = (roster ?? []).map((r) => r.athlete_id);
   if (!ids.length) return [];
-
-  const from = addDays(today, -LOOKBACK_DAYS);
-  const [{ data: sessions }, { data: acts }, { data: profs }, { data: already }] = await Promise.all([
-    supabase.from("scheduled_sessions").select("athlete_id, date, disc, done, created_at")
-      .in("athlete_id", ids).gte("date", from).lt("date", today),
-    supabase.from("external_activities").select("user_id, disc, start_time")
-      .in("user_id", ids).gte("start_time", addDays(from, -1) + "T00:00:00Z").is("duplicate_of", null),
-    supabase.from("profiles").select("id, full_name, first_name, last_name, email").in("id", ids),
-    supabase.from("coach_missed_alerts_sent").select("athlete_id, streak_start").eq("coach_id", coachId).gte("streak_start", from),
+  const [signals, { data: already }] = await Promise.all([
+    computeSignals(supabase, ids, today, LOOKBACK_DAYS),
+    supabase.from("coach_missed_alerts_sent").select("athlete_id, streak_start").eq("coach_id", coachId)
+      .gte("streak_start", addDays(today, -LOOKBACK_DAYS)),
   ]);
-
-  const actSet = new Set((acts ?? []).map((a) => `${a.user_id}|${parisParts(new Date(a.start_time)).day}|${a.disc}`));
   const sentSet = new Set((already ?? []).map((a) => `${a.athlete_id}|${a.streak_start}`));
-  const nameOf = (id: string) => {
-    const p = (profs ?? []).find((x) => x.id === id);
-    return (p && ([p.first_name, p.last_name].filter(Boolean).join(" ") || p.full_name || (p.email ?? "").split("@")[0])) || "Un athlète";
-  };
-
-  const out: Missed[] = [];
-  for (const id of ids) {
-    const list = (sessions ?? [])
-      .filter((s) => s.athlete_id === id)
-      // créée après sa date : historique complété par le coach, pas une séance « manquée »
-      .filter((s) => parisParts(new Date(s.created_at)).day <= s.date)
-      .sort((a, b) => (a.date < b.date ? 1 : -1));
-    const dates: string[] = [];
-    for (const s of list) {
-      const realised = s.done || (FAMILY[s.disc] ?? [s.disc]).some((f) => actSet.has(`${id}|${s.date}|${f}`));
-      if (realised) break;
-      dates.push(s.date);
-    }
-    if (dates.length < threshold) continue;
-    const streakStart = dates[dates.length - 1];
-    if (sentSet.has(`${id}|${streakStart}`)) continue;
-    out.push({ athleteId: id, name: nameOf(id), count: dates.length, streakStart, dates: dates.slice().reverse() });
-  }
-  return out;
+  return signals
+    .filter((g) => g.missedDates.length >= threshold && !sentSet.has(`${g.athleteId}|${g.missedDates[0]}`))
+    .map((g) => ({ athleteId: g.athleteId, name: g.name, count: g.missedDates.length, streakStart: g.missedDates[0], dates: g.missedDates }));
 }
 
 async function sendPush(supabase: SupabaseClient, appServer: webpush.ApplicationServer | null, userId: string, title: string, body: string): Promise<boolean> {
