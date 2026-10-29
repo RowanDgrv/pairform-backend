@@ -123,7 +123,9 @@ Deno.serve(async (req) => {
       };
     }).sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
 
-    return json({ today, athletes, to_check: toCheck });
+    // « Traité » (0081) : marques du coach, partagées entre ses appareils.
+    const { data: dis } = await sb.from("coach_need_dismissals").select("need_key").eq("coach_id", user.id);
+    return json({ today, athletes, to_check: toCheck, done_keys: (dis ?? []).map((d: any) => d.need_key) });
   } catch (e) {
     console.error(e);
     return json({ error: "server", detail: String(e).slice(0, 200) }, 500);
