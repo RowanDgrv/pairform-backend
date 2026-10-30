@@ -1,0 +1,11 @@
+-- =============================================================================
+--  0082 — Carnet de musculation : séries réellement faites (30/10/2026)
+--
+--  Saisi par l'athlète (fenêtre « Saisir mes séries », pré-remplie avec le
+--  prévu), comparé au prévu par sillance-strength.js (règles de code).
+--  Format : { saved_at, exercises: [{ key, exercise,
+--             planned: {sets, reps, weight, rpe}, sets: [{reps, kg}] }] }
+--  Écriture : policy existante « sched: athlete updates own » (athlète) et
+--  « sched: coach manages athlete plan » (coach).
+-- =============================================================================
+alter table public.scheduled_sessions add column if not exists strength_log jsonb;
