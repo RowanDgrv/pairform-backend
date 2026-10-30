@@ -1,9 +1,10 @@
 // =============================================================================
 //  Edge Function : export-fit-workout (22/09/2026)
 //  ---------------------------------------------------------------------------
-//  Garmin n'autorise pas l'envoi téléphone → montre d'un fichier de séance
-//  structurée (il faut brancher la montre en USB à un ordinateur et copier le
-//  .FIT dans /Garmin/NewFiles) ; Coros nécessite un partenariat approuvé pour
+//  Garmin n'autorise pas une app tierce à pousser une séance sans partenariat ;
+//  l'athlète importe le .FIT sur le SITE Garmin Connect (Entraînements >
+//  Importer, puis « Envoyer vers l'appareil » — l'app mobile ne sait pas
+//  importer), ou le copie en USB dans /Garmin/NewFiles ; Coros nécessite un partenariat approuvé pour
 //  pousser une séance ; Polar n'expose pas d'API d'envoi. Le seul morceau
 //  livrable sans dépendre d'un tiers : générer un vrai fichier .FIT
 //  "workout" (structure officielle Garmin FIT SDK) que l'athlète charge
