@@ -14,9 +14,10 @@ export const ZONES = ["Z1", "Z2", "Z3", "Z4", "Z5"] as const;
 export type Discipline = (typeof DISCIPLINES)[number];
 
 export interface AssistantAuth {
-  athleteId: string;
+  athleteId: string;      // scope 'coach' : id du COACH
   canWrite: boolean;
   tokenHash: string;
+  scope: "athlete" | "coach";
 }
 
 // -----------------------------------------------------------------------------
@@ -32,17 +33,25 @@ export async function resolveToken(sb: SupabaseClient, authHeader: string): Prom
   if (!m) return null;
   const tokenHash = await sha256Hex(m[1].trim());
 
-  const { data, error } = await sb.from("assistant_tokens")
-    .select("athlete_id, can_write, revoked_at")
+  // scope (0084) : lu si la colonne existe, sinon repli sur l'ancien schéma
+  // (ne casse pas l'API tant que la migration n'est pas passée).
+  let { data, error } = await sb.from("assistant_tokens")
+    .select("athlete_id, can_write, revoked_at, scope")
     .eq("token_hash", tokenHash)
     .maybeSingle();
+  if (error) {
+    ({ data, error } = await sb.from("assistant_tokens")
+      .select("athlete_id, can_write, revoked_at")
+      .eq("token_hash", tokenHash)
+      .maybeSingle());
+  }
   if (error || !data || data.revoked_at) return null;
 
   // trace d'usage (best-effort, non bloquant)
   sb.from("assistant_tokens").update({ last_used_at: new Date().toISOString() })
     .eq("token_hash", tokenHash).then(() => {}, () => {});
 
-  return { athleteId: data.athlete_id, canWrite: data.can_write, tokenHash };
+  return { athleteId: data.athlete_id, canWrite: data.can_write, tokenHash, scope: (data as { scope?: string }).scope === "coach" ? "coach" : "athlete" };
 }
 
 // -----------------------------------------------------------------------------

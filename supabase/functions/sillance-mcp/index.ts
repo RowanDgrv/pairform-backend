@@ -14,7 +14,12 @@
 //  Les données viennent de assistant-api (même périmètre : UN athlète, celui
 //  de la clé) : ce connecteur ne fait que traduire MCP ↔ REST.
 // =============================================================================
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { resolveToken } from "../_shared/assistant.ts";
+import { athletePlanning, cancelSession, programSession, roster } from "../_shared/coachTools.ts";
+
 const BASE = `${Deno.env.get("SUPABASE_URL")}/functions/v1/assistant-api`;
+const admin = () => createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
 const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "content-type, mcp-protocol-version, mcp-session-id, authorization",
@@ -35,6 +40,39 @@ const TOOLS: Tool[] = [
   { name: "sillance_activites", description: "Activités réalisées (COROS, Strava) sur les derniers jours.",
     path: (a) => `activities?days=${Math.min(90, Number(a.days) || 14)}`, schema: { days: { type: "number", description: "Nombre de jours (défaut 14)" } } },
   { name: "sillance_references", description: "Références physiologiques : FTP, PMA, VMA, allure seuil, CSS, FC max et repos.", path: () => "refs", schema: {} },
+];
+
+// ---------- outils COACH (clés scope 'coach', 0084) ----------
+const LIGNE = { type: "object", properties: {
+  type: { type: "string", enum: ["echauffement", "effort", "recup", "contre_effort", "retour_calme"], description: "Rôle de la ligne" },
+  duree_min: { type: "number", description: "Durée en minutes (décimales acceptées : 0.5 = 30 s)" },
+  distance_m: { type: "number", description: "Distance en mètres" },
+  reps: { type: "number", description: "Muscu : nombre de répétitions" },
+  exercice: { type: "string", description: "Muscu : nom de l'exercice (ex. Squat bulgare)" },
+  charge_kg: { type: "number", description: "Muscu : charge en kg" },
+  zone: { type: "string", description: "Zone Z1 à Z5 (en % de FC max par défaut)" },
+  pct: { type: "number", description: "Intensité en % d'une référence de l'athlète (avec reference)" },
+  reference: { type: "string", enum: ["vma", "ftp", "fc", "pma", "seuil", "cv", "pc"], description: "Référence pour pct" },
+  bpm_min: { type: "number" }, bpm_max: { type: "number" },
+  allure: { type: "string", description: "Allure exacte min:s par km, ex. 4:30" },
+  watts: { type: "number", description: "Puissance exacte en W" },
+  rpe: { type: "number", description: "RPE 1 à 10 (facultatif)" },
+} };
+const COACH_TOOLS = [
+  { name: "sillance_athletes", description: "Liste des athlètes du coach (suivis et membres de ses clubs) avec leur id.", inputSchema: { type: "object", properties: {} }, annotations: { readOnlyHint: true } },
+  { name: "sillance_planning_athlete", description: "Planning d'un athlète du coach (séances prévues, faites ou non). Par défaut : aujourd'hui → +13 jours.",
+    inputSchema: { type: "object", required: ["athlete"], properties: { athlete: { type: "string", description: "Nom ou id de l'athlète" }, from: { type: "string" }, to: { type: "string" } } }, annotations: { readOnlyHint: true } },
+  { name: "sillance_programmer_seance", description: "Programme une séance dans le planning d'un athlète du coach. Structure en blocs : chaque bloc a un nombre de répétitions et des lignes (ex. 5 × [1000 m effort à 95 % VMA + 2 min récup]). Toujours résumer la séance au coach et attendre son accord avant d'appeler cet outil.",
+    inputSchema: { type: "object", required: ["athlete", "date", "sport", "titre", "blocs"], properties: {
+      athlete: { type: "string", description: "Nom ou id de l'athlète" },
+      date: { type: "string", description: "AAAA-MM-JJ (aujourd'hui ou plus tard)" },
+      sport: { type: "string", enum: ["run", "bike", "swim", "strength"] },
+      titre: { type: "string" },
+      note_coach: { type: "string", description: "Consigne visible par l'athlète (facultatif)" },
+      blocs: { type: "array", items: { type: "object", properties: { repetitions: { type: "number" }, titre: { type: "string" }, lignes: { type: "array", items: LIGNE } } } },
+    } }, annotations: { readOnlyHint: false, destructiveHint: false } },
+  { name: "sillance_annuler_seance", description: "Supprime une séance NON réalisée d'un athlète du coach (id donné par sillance_planning_athlete). Demander confirmation au coach avant.",
+    inputSchema: { type: "object", required: ["id"], properties: { id: { type: "string" } } }, annotations: { readOnlyHint: false, destructiveHint: true } },
 ];
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...CORS, "Content-Type": "application/json" } });
@@ -69,9 +107,23 @@ Deno.serve(async (req) => {
       });
     }
     if (method === "ping") return rpc(id, {});
+    const auth = (method === "tools/list" || method === "tools/call") ? await resolveToken(admin(), `Bearer ${token}`) : null;
+    const isCoach = auth?.scope === "coach" && auth.canWrite;
     if (method === "tools/list") {
-      return rpc(id, { tools: TOOLS.map((t) => ({ name: t.name, description: t.description,
-        inputSchema: { type: "object", properties: t.schema }, annotations: { readOnlyHint: true } })) });
+      const base = TOOLS.map((t) => ({ name: t.name, description: t.description,
+        inputSchema: { type: "object", properties: t.schema }, annotations: { readOnlyHint: true } }));
+      return rpc(id, { tools: isCoach ? [...base, ...COACH_TOOLS] : base });
+    }
+    if (method === "tools/call" && COACH_TOOLS.some((t) => t.name === params?.name)) {
+      if (!auth) return rpcErr(id, -32001, "Clé Sillance révoquée ou invalide");
+      if (!isCoach) return rpc(id, { content: [{ type: "text", text: "Outil réservé aux clés coach." }], isError: true });
+      const a = (params?.arguments as Record<string, unknown>) || {};
+      const sb = admin();
+      const text = params?.name === "sillance_athletes" ? JSON.stringify(await roster(sb, auth.athleteId))
+        : params?.name === "sillance_planning_athlete" ? await athletePlanning(sb, auth.athleteId, a)
+        : params?.name === "sillance_programmer_seance" ? await programSession(sb, auth.athleteId, a)
+        : await cancelSession(sb, auth.athleteId, String(a.id || ""));
+      return rpc(id, { content: [{ type: "text", text }] });
     }
     if (method === "tools/call") {
       const t = TOOLS.find((x) => x.name === params?.name);
