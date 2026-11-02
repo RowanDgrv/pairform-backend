@@ -177,6 +177,45 @@ Deno.serve(async (req) => {
       return json({ ok: true, clubId: club.id });
     }
 
+    // Habillage par club (0085) : Rowan crée les PROPOSITIONS (theme_options),
+    // le gérant choisit parmi elles (trigger clubs_theme_guard). L'admin peut
+    // aussi poser directement l'habillage actif (theme).
+    if (action === "getClub") {
+      if (!p.clubId) return json({ error: "clubId requis" }, 400);
+      const { data, error } = await sb.from("clubs").select("id, name, theme, theme_options").eq("id", p.clubId).maybeSingle();
+      if (error) throw error;
+      if (!data) return json({ error: "Club introuvable" }, 404);
+      return json({ club: data });
+    }
+    if (action === "setClubThemeOptions") {
+      const { clubId, options } = p;
+      if (!clubId) return json({ error: "clubId requis" }, 400);
+      if (!Array.isArray(options) || options.length > 8 || JSON.stringify(options).length > 600000
+        || options.some((o: unknown) => !o || typeof o !== "object" || Array.isArray(o) || !(o as { id?: unknown }).id)) {
+        return json({ error: "options invalides (8 propositions max, chacune avec un id)" }, 400);
+      }
+      const { data: club, error: rErr } = await sb.from("clubs").select("theme").eq("id", clubId).maybeSingle();
+      if (rErr) throw rErr;
+      if (!club) return json({ error: "Club introuvable" }, 404);
+      // habillage actif modifié ou supprimé par l'admin → le suivre
+      const activeId = (club.theme as { id?: string } | null)?.id;
+      const patch: Record<string, unknown> = { theme_options: options };
+      if (activeId) patch.theme = options.find((o: { id: string }) => o.id === activeId) ?? null;
+      const { error } = await sb.from("clubs").update(patch).eq("id", clubId);
+      if (error) throw error;
+      return json({ ok: true });
+    }
+    if (action === "setClubTheme") {
+      const { clubId, theme } = p;
+      if (!clubId) return json({ error: "clubId requis" }, 400);
+      if (theme !== null && (typeof theme !== "object" || Array.isArray(theme) || JSON.stringify(theme).length > 150000)) {
+        return json({ error: "theme invalide (objet ≤ 150 Ko ou null)" }, 400);
+      }
+      const { error } = await sb.from("clubs").update({ theme }).eq("id", clubId);
+      if (error) throw error;
+      return json({ ok: true });
+    }
+
     if (action === "suspend") {
       const { userId, suspend } = p;
       if (!userId) return json({ error: "userId requis" }, 400);
