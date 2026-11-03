@@ -83,3 +83,8 @@ verify_jwt = false
 # « Sillance + Club » (produit Sillance, payeur = propriétaire du club → JWT).
 [functions.club-premium-subscribe]
 verify_jwt = true
+
+# Appelé par pg_cron avec x-cron-secret seulement (pas de JWT) : toujours
+# déployer sans vérification JWT, sinon les rappels du matin tombent en 401.
+[functions.morning-digest]
+verify_jwt = false
