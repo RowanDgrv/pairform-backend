@@ -30,14 +30,21 @@ const DISC_GEAR: Record<string, string[]> = {
   hyrox: ["chaussures", "gants", "tenue", "eau"],
 };
 const GEAR_TAGS: Record<string, string> = {
-  "plaquette": "plaquettes", "pull": "pull-buoy", "élastique": "élastique",
-  "palme": "palmes", "tuba": "tuba", "ht": "home-trainer", "home trainer": "home-trainer",
+  // plaquettes, pull-buoy, palmes… : via scheduled_sessions.gear (0088)
   "vma": "montre GPS", "vo2max": "montre GPS",
-  "capteur": "capteur de puissance", "ftp": "capteur de puissance",
   "longue": "ravitaillement (gels/barres)",
 };
 
-type Session = { title: string; disc: string; dur: number; zone: string | null; shoe_id?: string | null };
+type Session = { title: string; disc: string; dur: number; zone: string | null; shoe_id?: string | null; gear?: string[] | null };
+// libellés du catalogue de matériel (miroir de sillance-equipment.js, FR)
+const EQUIP_LABEL: Record<string, string> = {
+  rain_jacket: "veste de pluie", headlamp: "lampe frontale", run_belt: "ceinture porte-flasques", trail_poles: "bâtons de trail",
+  power_meter: "capteur de puissance", home_trainer: "home-trainer", bike_computer: "compteur GPS vélo", bike_lights: "éclairage vélo",
+  paddles: "plaquettes", pullbuoy: "pull-buoy", fins: "palmes", snorkel: "tuba frontal", kickboard: "planche",
+  ankle_band: "élastique de chevilles", drag_chute: "parachute", wetsuit: "combinaison néoprène",
+  gps_watch: "montre GPS", hr_strap: "ceinture cardio",
+  mobility_band: "élastique de mobilité", foam_roller: "rouleau de massage", dumbbells: "haltères", kettlebell: "kettlebell",
+};
 
 function fmtDur(min: number): string {
   const h = Math.floor(min / 60), m = Math.round(min % 60);
@@ -46,7 +53,9 @@ function fmtDur(min: number): string {
 // shoes : id → nom des paires choisies par le coach (0086) — « baskets :
 // Nike Pegasus 40 » au lieu de « baskets ». Une seule « montre GPS » (plus de
 // « montre connectée » en doublon), plus de « pointes » (retour Rowan 03/11).
-function gearFor(sessions: Session[], shoes: Map<string, string> = new Map()): string[] {
+// owned : matériel déclaré par l'athlète (athlete_equipment, 0087) — ajoute
+// la ceinture cardio aux séances intenses course/vélo, le capteur au vélo.
+function gearFor(sessions: Session[], shoes: Map<string, string> = new Map(), owned: Set<string> = new Set()): string[] {
   const set = new Set<string>();
   for (const s of sessions) {
     const shoe = s.disc === "run" && s.shoe_id ? shoes.get(s.shoe_id) : undefined;
@@ -55,7 +64,10 @@ function gearFor(sessions: Session[], shoes: Map<string, string> = new Map()): s
     for (const k in GEAR_TAGS) if (t.includes(k)) set.add(GEAR_TAGS[k]);
     if (["Z4", "Z5"].includes(s.zone ?? "") || /vma|vo2|seuil|intervalle|fractionn/i.test(t)) {
       set.add("montre GPS");
+      if (["run", "bike"].includes(s.disc) && owned.has("hr_strap")) set.add(EQUIP_LABEL.hr_strap);
     }
+    if (s.disc === "bike" && owned.has("power_meter")) set.add(EQUIP_LABEL.power_meter);
+    for (const k of s.gear ?? []) set.add(EQUIP_LABEL[k] ?? k.replace(/^custom:/, "").replace(/-/g, " "));
   }
   return [...set];
 }
@@ -122,7 +134,7 @@ Deno.serve(async (req) => {
       // séances planifiées AUJOURD'HUI (heure locale de l'athlète)
       const { data: sessions } = await supabase
         .from("scheduled_sessions")
-        .select("title, disc, dur, zone, shoe_id")
+        .select("title, disc, dur, zone, shoe_id, gear")
         .eq("athlete_id", p.user_id)
         .eq("date", now.day)
         .eq("done", false);
@@ -138,7 +150,9 @@ Deno.serve(async (req) => {
         const { data: g } = await supabase.from("gear").select("id, name").in("id", shoeIds);
         (g ?? []).forEach((x) => shoes.set(x.id, x.name));
       }
-      const gear = gearFor(sessions as Session[], shoes);
+      const { data: eq } = await supabase.from("athlete_equipment").select("item_key").eq("athlete_id", p.user_id);
+      const owned = new Set((eq ?? []).map((r) => r.item_key as string));
+      const gear = gearFor(sessions as Session[], shoes, owned);
       const nutri = nutriFor(sessions as Session[]);
       const title = sessions.length > 1
         ? `Ta journée Sillance : ${sessions.length} séances`
