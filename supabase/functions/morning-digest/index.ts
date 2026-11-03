@@ -25,32 +25,36 @@ const DISC_LABEL: Record<string, string> = {
 const DISC_GEAR: Record<string, string[]> = {
   swim: ["maillot de bain", "bonnet", "lunettes"],
   bike: ["vélo", "casque", "tenue vélo", "bidon"],
-  run: ["chaussures de course", "tenue running"],
+  run: ["baskets", "tenue running"],
   strength: ["tapis", "tenue confortable"],
   hyrox: ["chaussures", "gants", "tenue", "eau"],
 };
 const GEAR_TAGS: Record<string, string> = {
   "plaquette": "plaquettes", "pull": "pull-buoy", "élastique": "élastique",
   "palme": "palmes", "tuba": "tuba", "ht": "home-trainer", "home trainer": "home-trainer",
-  "piste": "pointes (piste)", "vma": "montre GPS", "vo2max": "montre GPS",
+  "vma": "montre GPS", "vo2max": "montre GPS",
   "capteur": "capteur de puissance", "ftp": "capteur de puissance",
   "longue": "ravitaillement (gels/barres)",
 };
 
-type Session = { title: string; disc: string; dur: number; zone: string | null };
+type Session = { title: string; disc: string; dur: number; zone: string | null; shoe_id?: string | null };
 
 function fmtDur(min: number): string {
   const h = Math.floor(min / 60), m = Math.round(min % 60);
   return h ? `${h}h${String(m).padStart(2, "0")}` : `${m}min`;
 }
-function gearFor(sessions: Session[]): string[] {
+// shoes : id → nom des paires choisies par le coach (0086) — « baskets :
+// Nike Pegasus 40 » au lieu de « baskets ». Une seule « montre GPS » (plus de
+// « montre connectée » en doublon), plus de « pointes » (retour Rowan 03/11).
+function gearFor(sessions: Session[], shoes: Map<string, string> = new Map()): string[] {
   const set = new Set<string>();
   for (const s of sessions) {
-    (DISC_GEAR[s.disc] ?? []).forEach((g) => set.add(g));
+    const shoe = s.disc === "run" && s.shoe_id ? shoes.get(s.shoe_id) : undefined;
+    (DISC_GEAR[s.disc] ?? []).forEach((g) => set.add(g === "baskets" && shoe ? `baskets : ${shoe}` : g));
     const t = (s.title ?? "").toLowerCase();
     for (const k in GEAR_TAGS) if (t.includes(k)) set.add(GEAR_TAGS[k]);
     if (["Z4", "Z5"].includes(s.zone ?? "") || /vma|vo2|seuil|intervalle|fractionn/i.test(t)) {
-      set.add("montre connectée");
+      set.add("montre GPS");
     }
   }
   return [...set];
@@ -118,7 +122,7 @@ Deno.serve(async (req) => {
       // séances planifiées AUJOURD'HUI (heure locale de l'athlète)
       const { data: sessions } = await supabase
         .from("scheduled_sessions")
-        .select("title, disc, dur, zone")
+        .select("title, disc, dur, zone, shoe_id")
         .eq("athlete_id", p.user_id)
         .eq("date", now.day)
         .eq("done", false);
@@ -128,7 +132,13 @@ Deno.serve(async (req) => {
         `${DISC_LABEL[s.disc] ?? s.disc} : ${s.title}` +
         ` (${fmtDur(s.dur ?? 0)}${s.zone ? " · " + s.zone : ""})`
       );
-      const gear = gearFor(sessions as Session[]);
+      const shoeIds = [...new Set(sessions.map((s) => s.shoe_id).filter(Boolean))] as string[];
+      const shoes = new Map<string, string>();
+      if (shoeIds.length) {
+        const { data: g } = await supabase.from("gear").select("id, name").in("id", shoeIds);
+        (g ?? []).forEach((x) => shoes.set(x.id, x.name));
+      }
+      const gear = gearFor(sessions as Session[], shoes);
       const nutri = nutriFor(sessions as Session[]);
       const title = sessions.length > 1
         ? `Ta journée Sillance : ${sessions.length} séances`
