@@ -117,7 +117,11 @@ export async function programSession(sb: SupabaseClient, coachId: string, a: Rec
       maxPct = Math.max(maxPct, Number(r.line.pct) || 0);
     }
     if (!lines.length) return "Un bloc n'a aucune ligne.";
-    blocks.push({ series, title: String(b.titre || "").slice(0, 60), lines });
+    // bid/lid : identifiants attendus par l'éditeur de séance de l'app (sans
+    // eux, impossible de modifier une ligne créée ici, constaté 05/11/2026)
+    const bi = blocks.length;
+    lines.forEach((ln, li) => { ln.lid = `la${bi}_${li}_${Date.now().toString(36)}`; });
+    blocks.push({ bid: `ba${bi}_${Date.now().toString(36)}`, series, title: String(b.titre || "").slice(0, 60), lines });
   }
   const zone = maxPct >= 90 ? "Z5" : maxPct >= 80 ? "Z4" : maxPct >= 70 ? "Z3" : maxPct >= 60 ? "Z2" : "Z1";
   const row = { athlete_id: found.ath.id, created_by: coachId, date, disc, title: String(a.titre || "Séance").slice(0, 100),
