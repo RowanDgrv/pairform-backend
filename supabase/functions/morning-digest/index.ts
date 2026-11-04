@@ -56,6 +56,43 @@ function fmtDur(min: number): string {
 // « montre connectée » en doublon), plus de « pointes » (retour Rowan 03/11).
 // owned : matériel déclaré par l'athlète (athlete_equipment, 0087) — ajoute
 // la ceinture cardio aux séances intenses course/vélo, le capteur au vélo.
+// --- météo (05/11/2026) ------------------------------------------------------
+// Séance dehors : course, vélo hors home-trainer, triathlon. Natation et renfo
+// exclus. Pas d'heure de séance en base : on regarde la journée (7 h - 20 h).
+function hasOutdoor(sessions: Session[]): boolean {
+  return sessions.some((s) => (s.disc === "run" || s.disc === "tri" ||
+    (s.disc === "bike" && !/home.?trainer|\bht\b|zwift|rouleau/i.test(s.title || ""))));
+}
+// Position : départ de la dernière sortie Strava, arrondi à 0,1° (~10 km).
+// Seules ces coordonnées approximatives partent vers Open-Meteo, sans aucun
+// identifiant. Pas de position connue → pas de règle météo.
+async function lastPosition(sb: ReturnType<typeof createClient>, uid: string): Promise<[number, number] | null> {
+  const { data } = await sb.from("external_activities").select("raw").eq("user_id", uid)
+    .not("raw->start_latlng", "is", null).order("start_time", { ascending: false }).limit(5);
+  for (const r of data ?? []) {
+    const ll = (r as { raw?: { start_latlng?: number[] } }).raw?.start_latlng;
+    if (Array.isArray(ll) && ll.length === 2 && isFinite(ll[0]) && isFinite(ll[1]) && (ll[0] || ll[1])) {
+      return [Math.round(ll[0] * 10) / 10, Math.round(ll[1] * 10) / 10];
+    }
+  }
+  return null;
+}
+// Pluie probable : probabilité ≥ 60 % sur au moins une heure entre 7 h et 20 h,
+// ou cumul ≥ 1 mm. Erreur ou délai dépassé (3 s) → on n'ajoute rien.
+async function rainLikely(lat: number, lon: number, day: string): Promise<boolean> {
+  try {
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
+      `&hourly=precipitation_probability,precipitation&timezone=Europe%2FParis&start_date=${day}&end_date=${day}`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(3000) });
+    if (!res.ok) return false;
+    const j = await res.json();
+    const t: string[] = j?.hourly?.time ?? [], pp: number[] = j?.hourly?.precipitation_probability ?? [], mm: number[] = j?.hourly?.precipitation ?? [];
+    let maxP = 0, sum = 0;
+    t.forEach((h, i) => { const hh = +h.slice(11, 13); if (hh >= 7 && hh <= 20) { maxP = Math.max(maxP, pp[i] ?? 0); sum += mm[i] ?? 0; } });
+    return maxP >= 60 || sum >= 1;
+  } catch { return false; }
+}
+
 function gearFor(sessions: Session[], shoes: Map<string, string> = new Map(), owned: Set<string> = new Set()): string[] {
   const set = new Set<string>();
   for (const s of sessions) {
@@ -154,6 +191,11 @@ Deno.serve(async (req) => {
       const { data: eq } = await supabase.from("athlete_equipment").select("item_key").eq("athlete_id", p.user_id);
       const owned = new Set((eq ?? []).map((r) => r.item_key as string));
       const gear = gearFor(sessions as Session[], shoes, owned);
+      // Veste de pluie si pluie probable en journée et séance dehors (05/11/2026)
+      if (!gear.some((g) => g.startsWith("veste de pluie")) && hasOutdoor(sessions as Session[])) {
+        const pos = await lastPosition(supabase, p.user_id);
+        if (pos && await rainLikely(pos[0], pos[1], now.day)) gear.push("veste de pluie (pluie prévue)");
+      }
       const nutri = nutriFor(sessions as Session[]);
       // Textes variés du jour (05/11/2026) : prénom de l'athlète, prénom du
       // coach qui signe, accroche selon la séance et le jour de la semaine.
