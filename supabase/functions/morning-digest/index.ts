@@ -135,7 +135,7 @@ Deno.serve(async (req) => {
       // séances planifiées AUJOURD'HUI (heure locale de l'athlète)
       const { data: sessions } = await supabase
         .from("scheduled_sessions")
-        .select("title, disc, dur, zone, shoe_id, gear")
+        .select("title, disc, dur, zone, shoe_id, gear, coach_note")
         .eq("athlete_id", p.user_id)
         .eq("date", now.day)
         .eq("done", false);
@@ -167,7 +167,9 @@ Deno.serve(async (req) => {
       const firstName = me?.first_name || (me?.full_name || "").split(" ")[0] || null;
       const copy = morningCopy(sessions as Session[], { firstName, coachFirstName: coachFirst, day: now.day, userId: p.user_id });
       const title = copy.subject;
-      const bodyTxt = `${copy.intro}\n\n${copy.gearLabel} ${gear.join(", ")}`;
+      // commentaire du coach sur la séance (05/11/2026) : « Le mot de Rowan »
+      const notes = (sessions as { coach_note?: string | null }[]).map((x) => (x.coach_note || "").trim()).filter(Boolean);
+      const bodyTxt = `${copy.intro}\n\n${copy.gearLabel} ${gear.join(", ")}${notes.length ? `\n\n${notes.join(" ")}` : ""}`;
 
       // Un athlète en erreur ne doit jamais bloquer les suivants (avant : une
       // exception sortait de la boucle → 500 → tous les athlètes restants
@@ -184,7 +186,7 @@ Deno.serve(async (req) => {
             return await sendEmail({
               to: me.email,
               subject: title,
-              html: digestHtml(copy, lines, gear, nutri),
+              html: digestHtml(copy, lines, gear, nutri, notes, coachFirst),
             });
           })(),
           (async () => {
@@ -250,7 +252,7 @@ Deno.serve(async (req) => {
   }
 });
 
-function digestHtml(copy: ReturnType<typeof morningCopy>, lines: string[], gear: string[], nutri: string): string {
+function digestHtml(copy: ReturnType<typeof morningCopy>, lines: string[], gear: string[], nutri: string, notes: string[] = [], coach: string | null = null): string {
   return `
   <div style="font-family:system-ui,Segoe UI,sans-serif;max-width:520px;margin:0 auto;color:#0f1720;font-size:16px;line-height:1.6">
     <p>${escapeHtml(copy.greeting)}</p>
@@ -258,7 +260,9 @@ function digestHtml(copy: ReturnType<typeof morningCopy>, lines: string[], gear:
     <ul style="line-height:1.7;padding-left:20px">${lines.map((l) => `<li>${escapeHtml(l)}</li>`).join("")}</ul>
     <p><b>${escapeHtml(copy.gearLabel)}</b> ${gear.map(escapeHtml).join(", ")}</p>
     <p style="background:#f0f7f4;border-radius:10px;padding:12px 14px"><b>${escapeHtml(copy.nutriLabel)}</b> ${escapeHtml(nutri)}</p>
-    <p>${escapeHtml(copy.closing)}<br>${escapeHtml(copy.signature)}</p>
+    ${notes.length
+      ? `<p style="border-left:3px solid #0B7285;padding:4px 0 4px 14px"><span style="font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#0B7285;font-weight:700">Le mot de ${escapeHtml(coach || "ton coach")}</span><br>${notes.map(escapeHtml).join("<br>")}</p><p>${escapeHtml(copy.signature)}</p>`
+      : `<p>${escapeHtml(copy.closing)}<br>${escapeHtml(copy.signature)}</p>`}
     <p style="font-size:12px;color:#6b7682;margin-top:24px">Tu reçois ce mail car le rappel du matin est activé dans Sillance. Tu peux changer l'heure ou le canal dans ton espace athlète.</p>
   </div>`;
 }
