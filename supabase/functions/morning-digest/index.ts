@@ -12,6 +12,7 @@
 //  Secrets : CRON_SECRET, VAPID_KEYS_JSON (paire JWK), VAPID_SUBJECT,
 //            RESEND_API_KEY (optionnel — sans lui l'email est ignoré).
 // =============================================================================
+import { morningCopy } from "../_shared/morningCopy.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import * as webpush from "jsr:@negrel/webpush@0.3.0";
 import { corsHeaders } from "../_shared/cors.ts";
@@ -74,9 +75,9 @@ function gearFor(sessions: Session[], shoes: Map<string, string> = new Map(), ow
 function nutriFor(sessions: Session[]): string {
   const long = sessions.some((s) => (s.dur ?? 0) >= 120);
   const hard = sessions.some((s) => ["Z4", "Z5"].includes(s.zone ?? ""));
-  if (long) return "Sortie longue aujourd'hui : prévois 30–60 g de glucides/heure (gels, barres, boisson).";
-  if (hard) return "Séance intense : collation glucidique 1–2 h avant, protéines dans les 30 min après.";
-  return "Hydrate-toi bien tout au long de la journée.";
+  if (long) return "prévois 30 à 60 g de glucides par heure (gels, barres, boisson).";
+  if (hard) return "une collation glucidique 1 à 2 h avant, des protéines dans les 30 min après.";
+  return "hydrate-toi bien tout au long de la journée.";
 }
 
 /* heure locale (h, min, date ISO) d'un fuseau donné */
@@ -154,10 +155,19 @@ Deno.serve(async (req) => {
       const owned = new Set((eq ?? []).map((r) => r.item_key as string));
       const gear = gearFor(sessions as Session[], shoes, owned);
       const nutri = nutriFor(sessions as Session[]);
-      const title = sessions.length > 1
-        ? `Ta journée Sillance : ${sessions.length} séances`
-        : `Ta séance du jour : ${DISC_LABEL[sessions[0].disc] ?? sessions[0].disc}`;
-      const bodyTxt = `${lines.join("\n")}\n\nÀ prévoir : ${gear.join(", ")}\n${nutri}`;
+      // Textes variés du jour (05/11/2026) : prénom de l'athlète, prénom du
+      // coach qui signe, accroche selon la séance et le jour de la semaine.
+      const { data: me } = await supabase.from("profiles").select("email, first_name, full_name").eq("id", p.user_id).single();
+      const { data: link } = await supabase.from("coach_athlete").select("coach_id").eq("athlete_id", p.user_id).eq("status", "active").limit(1).maybeSingle();
+      let coachFirst: string | null = null;
+      if (link?.coach_id && link.coach_id !== p.user_id) {
+        const { data: c } = await supabase.from("profiles").select("first_name, full_name").eq("id", link.coach_id).single();
+        coachFirst = c?.first_name || (c?.full_name || "").split(" ")[0] || null;
+      }
+      const firstName = me?.first_name || (me?.full_name || "").split(" ")[0] || null;
+      const copy = morningCopy(sessions as Session[], { firstName, coachFirstName: coachFirst, day: now.day, userId: p.user_id });
+      const title = copy.subject;
+      const bodyTxt = `${copy.intro}\n\n${copy.gearLabel} ${gear.join(", ")}`;
 
       // Un athlète en erreur ne doit jamais bloquer les suivants (avant : une
       // exception sortait de la boucle → 500 → tous les athlètes restants
@@ -170,13 +180,11 @@ Deno.serve(async (req) => {
         const [emailOk, pushOk] = await Promise.all([
           (async () => {
             if (p.channel !== "email" && p.channel !== "both") return false;
-            const { data: prof } = await supabase.from("profiles")
-              .select("email, full_name").eq("id", p.user_id).single();
-            if (!prof?.email) return false;
+            if (!me?.email) return false;
             return await sendEmail({
-              to: prof.email,
-              subject: `☀️ ${title}`,
-              html: digestHtml(prof.full_name || "champion·ne", lines, gear, nutri),
+              to: me.email,
+              subject: title,
+              html: digestHtml(copy, lines, gear, nutri),
             });
           })(),
           (async () => {
@@ -242,16 +250,16 @@ Deno.serve(async (req) => {
   }
 });
 
-function digestHtml(name: string, lines: string[], gear: string[], nutri: string): string {
+function digestHtml(copy: ReturnType<typeof morningCopy>, lines: string[], gear: string[], nutri: string): string {
   return `
-  <div style="font-family:system-ui,Segoe UI,sans-serif;max-width:520px;margin:0 auto;color:#0f1720">
-    <h2 style="font-weight:800">Sillance : ton programme du jour</h2>
-    <p>Salut ${escapeHtml(name)} ! Voilà ce qui t'attend aujourd'hui :</p>
-    <ul style="line-height:1.7">${lines.map((l) => `<li>${escapeHtml(l)}</li>`).join("")}</ul>
-    <p style="margin-top:18px"><b>🎒 À prévoir :</b> ${gear.map(escapeHtml).join(" · ")}</p>
-    <p style="background:#f0f7f4;border-radius:10px;padding:12px 14px">🥣 ${escapeHtml(nutri)}</p>
-    <p style="font-size:12px;color:#6b7682;margin-top:24px">Tu reçois cet email car le rappel du matin
-    est activé dans Sillance. Change l'heure ou le canal dans ton espace athlète.</p>
+  <div style="font-family:system-ui,Segoe UI,sans-serif;max-width:520px;margin:0 auto;color:#0f1720;font-size:16px;line-height:1.6">
+    <p>${escapeHtml(copy.greeting)}</p>
+    <p>${copy.weekdayLine ? escapeHtml(copy.weekdayLine) + " " : ""}${escapeHtml(copy.intro)}</p>
+    <ul style="line-height:1.7;padding-left:20px">${lines.map((l) => `<li>${escapeHtml(l)}</li>`).join("")}</ul>
+    <p><b>${escapeHtml(copy.gearLabel)}</b> ${gear.map(escapeHtml).join(", ")}</p>
+    <p style="background:#f0f7f4;border-radius:10px;padding:12px 14px"><b>${escapeHtml(copy.nutriLabel)}</b> ${escapeHtml(nutri)}</p>
+    <p>${escapeHtml(copy.closing)}<br>${escapeHtml(copy.signature)}</p>
+    <p style="font-size:12px;color:#6b7682;margin-top:24px">Tu reçois ce mail car le rappel du matin est activé dans Sillance. Tu peux changer l'heure ou le canal dans ton espace athlète.</p>
   </div>`;
 }
 function escapeHtml(s: string): string {
