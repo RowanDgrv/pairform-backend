@@ -151,7 +151,7 @@ Deno.serve(async (req) => {
               if ((ch !== "email" && ch !== "both") || !coach.email) return false;
               return await sendEmail({
                 to: coach.email,
-                subject: `📅 ${title}`,
+                subject: title,
                 html: coachHtml(coach.full_name || "coach", names, weekLabel, checkpoint, deadlineDay, appUrl),
               });
             })(),

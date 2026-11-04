@@ -305,7 +305,7 @@ function digestHtml(copy: ReturnType<typeof morningCopy>, lines: string[], gear:
     ${notes.length
       ? `<p style="border-left:3px solid #0B7285;padding:4px 0 4px 14px"><span style="font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#0B7285;font-weight:700">Le mot de ${escapeHtml(coach || "ton coach")}</span><br>${notes.map(escapeHtml).join("<br>")}</p><p>${escapeHtml(copy.signature)}</p>`
       : `<p>${escapeHtml(copy.closing)}<br>${escapeHtml(copy.signature)}</p>`}
-    <p style="font-size:12px;color:#6b7682;margin-top:24px">Tu reçois ce mail car le rappel du matin est activé dans Sillance. Tu peux changer l'heure ou le canal dans ton espace athlète.</p>
+    <p style="font-size:12px;color:#6b7682;margin-top:24px">Tu reçois ce mail car le rappel du matin est activé dans Sillance. Tu peux changer l'heure ou le couper à tout moment : <a href="https://sillance.app/sillance-app.html" style="color:#6b7682">mon rappel du matin</a>.</p>
   </div>`;
 }
 function escapeHtml(s: string): string {

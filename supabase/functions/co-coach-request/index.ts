@@ -97,7 +97,7 @@ Deno.serve(async (req) => {
         if (p?.email) {
           await sendEmail({
             to: p.email,
-            subject: "Sillance — demande d'ajout de coach",
+            subject: "Demande d'ajout de coach sur Sillance",
             html: coCoachEmailHtml({
               title: "Ton athlète propose d'ajouter un coach",
               body: `${esc(athleteProfile?.full_name || "Ton athlète")} propose d'ajouter ${esc(email)}` +
@@ -108,7 +108,7 @@ Deno.serve(async (req) => {
       }
     }
     if (notifyTo) {
-      await sendEmail({ to: notifyTo, subject: "Sillance — demande d'ajout de coach", html: notifyHtml })
+      await sendEmail({ to: notifyTo, subject: "Demande d'ajout de coach sur Sillance", html: notifyHtml })
         .catch((e) => console.warn("email co-coach:", e));
     }
 

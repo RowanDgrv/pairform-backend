@@ -95,7 +95,7 @@ Deno.serve(async (req) => {
 
         const [emailOk, pushOk] = await Promise.all([
           (ch === "email" || ch === "both") && coach.email
-            ? sendEmail({ to: coach.email, subject: `⚠️ ${title}`, html: alertHtml(coach.first_name || coach.full_name || "coach", missed, appUrl) })
+            ? sendEmail({ to: coach.email, subject: title, html: alertHtml(coach.first_name || coach.full_name || "coach", missed, appUrl) })
             : Promise.resolve(false),
           ch === "push" || ch === "both"
             ? sendPush(supabase, appServer, coach.id, title, bodyTxt)
