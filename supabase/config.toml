@@ -88,3 +88,15 @@ verify_jwt = true
 # déployer sans vérification JWT, sinon les rappels du matin tombent en 401.
 [functions.morning-digest]
 verify_jwt = false
+
+# Réglages figés le 04/11/2026 : les déploiements n'ont plus besoin d'option.
+# Appelée par un utilisateur connecté : contrôle du jeton à l'entrée.
+[functions.co-coach-request]
+verify_jwt = true
+
+# Lancées par pg_cron (protégées par x-cron-secret) : pas de jeton utilisateur.
+[functions.coach-week-reminder]
+verify_jwt = false
+
+[functions.coach-missed-alert]
+verify_jwt = false
