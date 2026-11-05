@@ -133,6 +133,13 @@ Deno.serve(async (req) => {
       subscription_data: { metadata: subMeta },
       metadata: subMeta,
       allow_promotion_codes: true,
+      // Facturation (05/11/2026) : une facture entre professionnels doit porter
+      // le nom et l'adresse du client. Checkout les demande et les enregistre
+      // sur le client Stripe (repris sur chaque facture d'abonnement) ; le
+      // numéro de TVA reste facultatif (coachs en franchise de TVA).
+      billing_address_collection: "required",
+      customer_update: { address: "auto", name: "auto" },
+      tax_id_collection: { enabled: true },
       success_url: `${APP_URL}/sillance-app.html?checkout=success`,
       cancel_url: `${APP_URL}/sillance-app.html?checkout=cancel`,
     });
