@@ -19,6 +19,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { corsHeaders } from "../_shared/cors.ts";
 import { alertAiFailure } from "../_shared/aiAlert.ts";
 import { summarizeWeek, aiErrorDetail } from "../_shared/ai.ts";
+import { aiConsentBlock } from "../_shared/aiConsent.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -55,6 +56,12 @@ Deno.serve(async (req) => {
     const { data: ok, error: gErr } = await supabase.rpc("has_ai_addon", { uid: user.id });
     if (gErr) throw gErr;
     if (!ok) return json({ error: "add_on_required", price_eur: 12 }, 402);
+
+    // --- Consentement de l'athlète (0091, politique 3.9) : avant le cache,
+    // pour qu'un refus coupe aussi l'accès aux analyses déjà générées. ---
+    stage = "consent";
+    const refused = await aiConsentBlock(supabase, user.id, athlete_id ?? null);
+    if (refused) return json({ error: refused }, 403);
 
     // --- Cache : déjà généré pour cette semaine+athlète ? ---
     // (.eq("athlete_id", null) ne matcherait jamais une colonne NULL en SQL —
