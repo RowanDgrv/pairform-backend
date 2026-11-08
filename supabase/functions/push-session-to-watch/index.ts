@@ -9,7 +9,12 @@
 //  quand cette écriture existera.
 //
 //  Body : { scheduled_session_id: string, date?: string (YYYY-MM-DD, sinon
-//           la date de la séance) }
+//           la date de la séance), force?: boolean }
+//  Anti-doublon (08/11/2026, 0092) : COROS crée une nouvelle séance à chaque
+//  appel. Une séance déjà envoyée renvoie { error:"already_sent",
+//  pushed_at, changed } sans rien pousser — changed = la séance a été
+//  modifiée ou déplacée depuis l'envoi (l'ancienne version reste sur la
+//  montre). force:true renvoie quand même.
 //  Auth : JWT — l'athlète lui-même, son coach personnel, ou un coach/admin
 //         du même club (mêmes règles que club_coach_manages/is_coach_of,
 //         réimplémentées ici car ce endpoint tourne en service_role, pas de
@@ -18,6 +23,14 @@
 import { admin, corsHeaders, json, userFromReq } from "../_shared/providers.ts";
 import { decryptConn } from "../_shared/tokenCrypto.ts";
 import { pushPlannedSession } from "../_shared/corosMcp.ts";
+
+/** Empreinte du contenu réellement envoyé : sert à savoir si la séance a
+ *  changé depuis le dernier envoi. */
+async function pushSig(s: any, target: string): Promise<string> {
+  const raw = JSON.stringify([target, s.disc, s.title, s.blocks || [], s.coach_note || ""]);
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(raw));
+  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
 
 async function canManage(sb: ReturnType<typeof admin>, callerId: string, athleteId: string): Promise<boolean> {
   if (callerId === athleteId) return true;
@@ -40,11 +53,11 @@ Deno.serve(async (req) => {
     const user = await userFromReq(sb, req);
     if (!user) return json({ error: "Non authentifié" }, 401);
 
-    const { scheduled_session_id, date } = await req.json().catch(() => ({}));
+    const { scheduled_session_id, date, force } = await req.json().catch(() => ({}));
     if (!scheduled_session_id) return json({ error: "scheduled_session_id requis" }, 400);
 
     const { data: session, error: sessErr } = await sb.from("scheduled_sessions")
-      .select("id, athlete_id, date, disc, title, blocks, coach_note").eq("id", scheduled_session_id).maybeSingle();
+      .select("id, athlete_id, date, disc, title, blocks, coach_note, watch_pushed_at, watch_pushed_sig").eq("id", scheduled_session_id).maybeSingle();
     if (sessErr || !session) return json({ error: "Séance introuvable" }, 404);
 
     if (!(await canManage(sb, user.id, session.athlete_id))) {
@@ -65,6 +78,14 @@ Deno.serve(async (req) => {
     const parisToday = new Intl.DateTimeFormat("fr-CA", { timeZone: "Europe/Paris" }).format(new Date());
     if (target < parisToday) return json({ error: "past_date" }, 409);
     if (session.disc !== "run" && session.disc !== "bike") return json({ error: "unsupported_sport", disc: session.disc }, 409);
+    const sig = await pushSig(session, target);
+    if (session.watch_pushed_at && !force) {
+      return json({
+        error: "already_sent",
+        pushed_at: session.watch_pushed_at,
+        changed: session.watch_pushed_sig !== sig,
+      }, 409);
+    }
     const conn = await decryptConn(connRow);
 
     const { data: ref } = await sb.from("athlete_profiles")
@@ -77,6 +98,10 @@ Deno.serve(async (req) => {
         target,
         ref || {},
       );
+      const { error: markErr } = await sb.from("scheduled_sessions")
+        .update({ watch_pushed_at: new Date().toISOString(), watch_pushed_sig: sig })
+        .eq("id", session.id);
+      if (markErr) console.error("push-session-to-watch: marquage envoi", markErr.message);
       return json(result);
     } catch (e) {
       const msg = String((e as Error)?.message ?? e);
