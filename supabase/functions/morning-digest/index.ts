@@ -63,19 +63,18 @@ function hasOutdoor(sessions: Session[]): boolean {
   return sessions.some((s) => (s.disc === "run" || s.disc === "tri" ||
     (s.disc === "bike" && !/home.?trainer|\bht\b|zwift|rouleau/i.test(s.title || ""))));
 }
-// Position : départ de la dernière sortie Strava, arrondi à 0,1° (~10 km).
-// Seules ces coordonnées approximatives partent vers Open-Meteo, sans aucun
-// identifiant. Pas de position connue → pas de règle météo.
+// Position : celle que l'athlète a accepté de partager dans « Rappel du matin »
+// (migration 0093), déjà arrondie à 0,1° (~10 km) par l'app. Seules ces
+// coordonnées approximatives partent vers Open-Meteo, sans aucun identifiant.
+// Pas d'accord ou pas de position → pas de règle météo. Requête à part et
+// tolérante : si la colonne manque, le rappel part quand même, sans météo.
+// (10/11/2026 : remplace le départ de la dernière sortie Strava.)
 async function lastPosition(sb: ReturnType<typeof createClient>, uid: string): Promise<[number, number] | null> {
-  const { data } = await sb.from("external_activities").select("raw").eq("user_id", uid)
-    .not("raw->start_latlng", "is", null).order("start_time", { ascending: false }).limit(5);
-  for (const r of data ?? []) {
-    const ll = (r as { raw?: { start_latlng?: number[] } }).raw?.start_latlng;
-    if (Array.isArray(ll) && ll.length === 2 && isFinite(ll[0]) && isFinite(ll[1]) && (ll[0] || ll[1])) {
-      return [Math.round(ll[0] * 10) / 10, Math.round(ll[1] * 10) / 10];
-    }
-  }
-  return null;
+  const { data, error } = await sb.from("notification_prefs").select("weather_lat, weather_lon").eq("user_id", uid).maybeSingle();
+  if (error || !data) return null;
+  const lat = Number((data as { weather_lat: unknown }).weather_lat), lon = Number((data as { weather_lon: unknown }).weather_lon);
+  if ((data as { weather_lat: unknown }).weather_lat == null || (data as { weather_lon: unknown }).weather_lon == null) return null;
+  return isFinite(lat) && isFinite(lon) ? [lat, lon] : null;
 }
 // Pluie probable : probabilité ≥ 60 % sur au moins une heure entre 7 h et 20 h,
 // ou cumul ≥ 1 mm. Erreur ou délai dépassé (3 s) → on n'ajoute rien.
