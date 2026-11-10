@@ -79,18 +79,28 @@ async function lastPosition(sb: ReturnType<typeof createClient>, uid: string): P
 }
 // Pluie probable : probabilité ≥ 60 % sur au moins une heure entre 7 h et 20 h,
 // ou cumul ≥ 1 mm. Erreur ou délai dépassé (3 s) → on n'ajoute rien.
-async function rainLikely(lat: number, lon: number, day: string): Promise<boolean> {
+// 10/11/2026 : on renvoie aussi la plage horaire de la pluie (première et
+// dernière heure pluvieuse entre 7 h et 20 h) pour l'annoncer dans le mail :
+// « La météo annonce de la pluie entre 16 h et 19 h ».
+async function rainWindow(lat: number, lon: number, day: string): Promise<{ from: number; to: number } | null> {
   try {
     const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
       `&hourly=precipitation_probability,precipitation&timezone=Europe%2FParis&start_date=${day}&end_date=${day}`;
     const res = await fetch(url, { signal: AbortSignal.timeout(3000) });
-    if (!res.ok) return false;
+    if (!res.ok) return null;
     const j = await res.json();
     const t: string[] = j?.hourly?.time ?? [], pp: number[] = j?.hourly?.precipitation_probability ?? [], mm: number[] = j?.hourly?.precipitation ?? [];
-    let maxP = 0, sum = 0;
-    t.forEach((h, i) => { const hh = +h.slice(11, 13); if (hh >= 7 && hh <= 20) { maxP = Math.max(maxP, pp[i] ?? 0); sum += mm[i] ?? 0; } });
-    return maxP >= 60 || sum >= 1;
-  } catch { return false; }
+    let maxP = 0, sum = 0; const wet: number[] = [];
+    t.forEach((h, i) => {
+      const hh = +h.slice(11, 13);
+      if (hh >= 7 && hh <= 20) {
+        maxP = Math.max(maxP, pp[i] ?? 0); sum += mm[i] ?? 0;
+        if ((pp[i] ?? 0) >= 60 || (mm[i] ?? 0) >= 0.2) wet.push(hh);
+      }
+    });
+    if (!(maxP >= 60 || sum >= 1) || !wet.length) return null;
+    return { from: Math.min(...wet), to: Math.max(...wet) + 1 };
+  } catch { return null; }
 }
 
 function gearFor(sessions: Session[], shoes: Map<string, string> = new Map(), owned: Set<string> = new Set()): string[] {
@@ -192,9 +202,14 @@ Deno.serve(async (req) => {
       const owned = new Set((eq ?? []).map((r) => r.item_key as string));
       const gear = gearFor(sessions as Session[], shoes, owned);
       // Veste de pluie si pluie probable en journée et séance dehors (05/11/2026)
+      let weatherLine = "";
       if (!gear.some((g) => g.startsWith("veste de pluie")) && hasOutdoor(sessions as Session[])) {
         const pos = await lastPosition(supabase, p.user_id);
-        if (pos && await rainLikely(pos[0], pos[1], now.day)) gear.push("veste de pluie (pluie prévue)");
+        const rain = pos ? await rainWindow(pos[0], pos[1], now.day) : null;
+        if (rain) {
+          gear.push("veste de pluie (pluie prévue)");
+          weatherLine = `La météo annonce de la pluie entre ${rain.from} h et ${rain.to} h : prévois ta veste de pluie.`;
+        }
       }
       const nutri = nutriFor(sessions as Session[]);
       // Textes variés du jour (05/11/2026) : prénom de l'athlète, prénom du
@@ -211,7 +226,7 @@ Deno.serve(async (req) => {
       const title = copy.subject;
       // commentaire du coach sur la séance (05/11/2026) : « Le mot de Rowan »
       const notes = (sessions as { coach_note?: string | null }[]).map((x) => (x.coach_note || "").trim()).filter(Boolean);
-      const bodyTxt = `${copy.intro}\n\n${copy.gearLabel} ${gear.join(", ")}${notes.length ? `\n\n${notes.join(" ")}` : ""}`;
+      const bodyTxt = `${copy.intro}\n\n${copy.gearLabel} ${gear.join(", ")}${weatherLine ? `\n${weatherLine}` : ""}${notes.length ? `\n\n${notes.join(" ")}` : ""}`;
 
       // Un athlète en erreur ne doit jamais bloquer les suivants (avant : une
       // exception sortait de la boucle → 500 → tous les athlètes restants
@@ -228,7 +243,7 @@ Deno.serve(async (req) => {
             return await sendEmail({
               to: me.email,
               subject: title,
-              html: digestHtml(copy, lines, gear, nutri, notes, coachFirst),
+              html: digestHtml(copy, lines, gear, nutri, notes, coachFirst, weatherLine),
             });
           })(),
           (async () => {
@@ -294,13 +309,14 @@ Deno.serve(async (req) => {
   }
 });
 
-function digestHtml(copy: ReturnType<typeof morningCopy>, lines: string[], gear: string[], nutri: string, notes: string[] = [], coach: string | null = null): string {
+function digestHtml(copy: ReturnType<typeof morningCopy>, lines: string[], gear: string[], nutri: string, notes: string[] = [], coach: string | null = null, weatherLine = ""): string {
   return `
   <div style="font-family:system-ui,Segoe UI,sans-serif;max-width:520px;margin:0 auto;color:#0f1720;font-size:16px;line-height:1.6">
     <p>${escapeHtml(copy.greeting)}</p>
     <p>${copy.weekdayLine ? escapeHtml(copy.weekdayLine) + " " : ""}${escapeHtml(copy.intro)}</p>
     <ul style="line-height:1.7;padding-left:20px">${lines.map((l) => `<li>${escapeHtml(l)}</li>`).join("")}</ul>
     <p><b>${escapeHtml(copy.gearLabel)}</b> ${gear.map(escapeHtml).join(", ")}</p>
+    ${weatherLine ? `<p style="background:#eef4fb;border-radius:10px;padding:12px 14px">☔ ${escapeHtml(weatherLine)}</p>` : ""}
     <p style="background:#f0f7f4;border-radius:10px;padding:12px 14px"><b>${escapeHtml(copy.nutriLabel)}</b> ${escapeHtml(nutri)}</p>
     ${notes.length
       ? `<p style="border-left:3px solid #0B7285;padding:4px 0 4px 14px"><span style="font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#0B7285;font-weight:700">Le mot de ${escapeHtml(coach || "ton coach")}</span><br>${notes.map(escapeHtml).join("<br>")}</p><p>${escapeHtml(copy.signature)}</p>`
