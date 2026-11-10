@@ -44,7 +44,7 @@ async function complianceData(sb: any, ids: string[], today: string) {
     sb.from("session_compliance").select("scheduled_session_id, verdict, summary")
       .in("athlete_id", ids).gte("computed_at", addDays(from, -7) + "T00:00:00Z"),
   ]);
-  const verdictOf = new Map((done ?? []).map((d: any) => [d.scheduled_session_id, d]));
+  const verdictOf = new Map<string, any>((done ?? []).map((d: any) => [d.scheduled_session_id, d]));
   const usedAct = new Set<string>();
   const toCheck: any[] = [], verdicts: any[] = [];
   for (const s of (sess ?? []).sort((a: any, b: any) => (a.date < b.date ? 1 : -1))) {

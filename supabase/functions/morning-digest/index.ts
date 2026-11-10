@@ -69,7 +69,8 @@ function hasOutdoor(sessions: Session[]): boolean {
 // Pas d'accord ou pas de position → pas de règle météo. Requête à part et
 // tolérante : si la colonne manque, le rappel part quand même, sans météo.
 // (10/11/2026 : remplace le départ de la dernière sortie Strava.)
-async function lastPosition(sb: ReturnType<typeof createClient>, uid: string): Promise<[number, number] | null> {
+// deno-lint-ignore no-explicit-any
+async function lastPosition(sb: any, uid: string): Promise<[number, number] | null> {
   const { data, error } = await sb.from("notification_prefs").select("weather_lat, weather_lon").eq("user_id", uid).maybeSingle();
   if (error || !data) return null;
   const lat = Number((data as { weather_lat: unknown }).weather_lat), lon = Number((data as { weather_lon: unknown }).weather_lon);
