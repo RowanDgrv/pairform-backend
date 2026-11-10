@@ -36,7 +36,7 @@ const GEAR_TAGS: Record<string, string> = {
   "longue": "ravitaillement (gels/barres)",
 };
 
-type Session = { title: string; disc: string; dur: number; zone: string | null; shoe_id?: string | null; gear?: string[] | null };
+type Session = { title: string; disc: string; dur: number; zone: string | null; shoe_id?: string | null; gear?: string[] | null; shoe_name?: string | null };
 // libellés du catalogue de matériel (miroir de sillance-equipment.js, FR)
 const EQUIP_LABEL: Record<string, string> = {
   rain_jacket: "veste de pluie", headlamp: "lampe frontale", run_belt: "ceinture porte-flasques", trail_poles: "bâtons de trail",
@@ -106,8 +106,11 @@ async function rainWindow(lat: number, lon: number, day: string): Promise<{ from
 function gearFor(sessions: Session[], shoes: Map<string, string> = new Map(), owned: Set<string> = new Set()): string[] {
   const set = new Set<string>();
   for (const s of sessions) {
-    const shoe = s.disc === "run" && s.shoe_id ? shoes.get(s.shoe_id) : undefined;
+    const shoe = s.disc === "run" ? ((s.shoe_id ? shoes.get(s.shoe_id) : undefined) ?? s.shoe_name ?? undefined) : undefined;
     (DISC_GEAR[s.disc] ?? []).forEach((g) => set.add(g === "baskets" && shoe ? `baskets : ${shoe}` : g));
+    // Montre GPS à chaque séance course, vélo ou triathlon (10/11/2026) : avant,
+    // seulement les séances intenses, donc absente d'un simple footing.
+    if (["run", "bike", "tri"].includes(s.disc)) set.add("montre GPS");
     const t = (s.title ?? "").toLowerCase();
     for (const k in GEAR_TAGS) if (t.includes(k)) set.add(GEAR_TAGS[k]);
     if (["Z4", "Z5"].includes(s.zone ?? "") || /vma|vo2|seuil|intervalle|fractionn/i.test(t)) {
@@ -118,6 +121,33 @@ function gearFor(sessions: Session[], shoes: Map<string, string> = new Map(), ow
     for (const k of s.gear ?? []) set.add(EQUIP_LABEL[k] ?? k.replace(/^custom:/, "").replace(/-/g, " "));
   }
   return [...set];
+}
+// Conseiller de paire (10/11/2026), miroir de recommendShoe() de l'app : quand
+// ni le coach ni l'athlète n'ont choisi de paire pour une séance de course, on
+// propose celle de l'athlète qui correspond au type de séance (usages cochés
+// sur la paire, sinon sa catégorie), la moins usée d'abord. Avant, le mail
+// disait juste « baskets » alors que l'app conseillait déjà une paire.
+type Shoe = { name: string; km: number; max_km: number; cat: string | null; session_types: string[] | null };
+function recommendShoe(s: Session, shoes: Shoe[]): string | null {
+  if (s.disc !== "run" || !shoes.length) return null;
+  const t = (s.title ?? "").toLowerCase();
+  let want: "race" | "interval" | "tempo" | "easy";
+  if (/comp[ée]t|course|marathon|semi|10k|5k|race/.test(t)) want = "race";
+  else if (/vma|fractionn|interval|r[ée]p[ée]tition/.test(t) || s.zone === "Z5") want = "interval";
+  else if (/seuil|tempo|vo2|dynamique|allure/.test(t) || s.zone === "Z4") want = "tempo";
+  else want = "easy";
+  const has = (g: Shoe, k: string) => Array.isArray(g.session_types) && g.session_types.includes(k);
+  const preds: Record<string, ((g: Shoe) => boolean)[]> = {
+    race: [(g) => has(g, "race"), (g) => has(g, "tempo"), (g) => g.cat === "race", (g) => g.cat === "tempo"],
+    interval: [(g) => has(g, "interval"), (g) => has(g, "tempo"), (g) => has(g, "race"), (g) => g.cat === "tempo"],
+    tempo: [(g) => has(g, "tempo"), (g) => has(g, "interval"), (g) => g.cat === "tempo", (g) => g.cat === "daily"],
+    easy: [(g) => has(g, "easy"), (g) => g.cat === "daily", (g) => has(g, "tempo")],
+  };
+  for (const pred of preds[want]) {
+    const cand = shoes.filter(pred).sort((x, y) => x.km / x.max_km - y.km / y.max_km)[0];
+    if (cand) return cand.name;
+  }
+  return null;   // aucune paire adaptée : on reste sur « baskets », sans en imposer une au hasard
 }
 function nutriFor(sessions: Session[]): string {
   const long = sessions.some((s) => (s.dur ?? 0) >= 120);
@@ -200,6 +230,13 @@ Deno.serve(async (req) => {
       }
       const { data: eq } = await supabase.from("athlete_equipment").select("item_key").eq("athlete_id", p.user_id);
       const owned = new Set((eq ?? []).map((r) => r.item_key as string));
+      if ((sessions as Session[]).some((s) => s.disc === "run" && !s.shoe_id)) {
+        const { data: pairs } = await supabase.from("gear").select("name, km, max_km, cat, session_types, retired")
+          .eq("athlete_id", p.user_id).eq("type", "shoe");
+        const alive: Shoe[] = (pairs ?? []).filter((g) => !g.retired && Number(g.km) < Number(g.max_km))
+          .map((g) => ({ name: g.name as string, km: Number(g.km), max_km: Number(g.max_km) || 1, cat: g.cat as string | null, session_types: g.session_types as string[] | null }));
+        for (const s of sessions as Session[]) if (s.disc === "run" && !s.shoe_id) s.shoe_name = recommendShoe(s, alive);
+      }
       const gear = gearFor(sessions as Session[], shoes, owned);
       // Veste de pluie si pluie probable en journée et séance dehors (05/11/2026)
       let weatherLine = "";
