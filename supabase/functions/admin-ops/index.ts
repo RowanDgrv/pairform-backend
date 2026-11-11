@@ -77,7 +77,8 @@ async function stripeSnapshot(sb: any) {
     created: iso(s.created), period_end: iso(s.current_period_end), cancel_at_period_end: !!s.cancel_at_period_end,
     canceled_at: iso(s.canceled_at), trial_end: iso(s.trial_end),
   }));
-  const invoices = (await stripe.invoices.list({ limit: 40, expand: ["data.customer"] })).data.map((i) => ({
+  // deno-lint-ignore no-explicit-any
+  const invoices = (await stripe.invoices.list({ limit: 40, expand: ["data.customer"] })).data.map((i: any) => ({
     customer: who(i.customer) || i.customer_email || "", status: i.status, amount: (i.amount_due ?? 0) / 100, paid: (i.amount_paid ?? 0) / 100,
     currency: i.currency, created: iso(i.created), number: i.number, attempts: i.attempt_count ?? 0,
   }));
