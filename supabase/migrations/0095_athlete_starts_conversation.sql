@@ -36,4 +36,7 @@ begin
 end;
 $$;
 revoke all on function start_coach_conversation(uuid) from public;
+-- Supabase donne aussi le droit d'exécution au rôle anon par défaut : on le retire (la fonction
+-- refuse déjà un appel non connecté, mais autant ne pas l'exposer).
+revoke all on function start_coach_conversation(uuid) from anon;
 grant execute on function start_coach_conversation(uuid) to authenticated;
