@@ -209,6 +209,17 @@ async function runProviders<T>(system: string, user: string, maxTokens: number,
   throw new AiError(attempts);
 }
 
+// ---- Consignes nutrition d'une séance (13/11/2026) ----------------------------
+// Même circuit que les résumés : Groq puis Anthropic en secours (sous-traitants déjà déclarés).
+export async function generateJson(system: string, user: string, maxTokens = 600): Promise<{ value: Record<string, unknown>; model: string }> {
+  return await runProviders(system, user, maxTokens, (text) => {
+    const m = text.match(/\{[\s\S]*\}/);
+    const v = JSON.parse(m ? m[0] : text);
+    if (!v || typeof v !== "object") throw new Error("not an object");
+    return v as Record<string, unknown>;
+  });
+}
+
 // ---- Rapport complet de séance (28/10/2026) ---------------------------------
 // Les chiffres sont DÉJÀ calculés par l'app (« dossier ») ; l'IA rédige.
 export async function generateReport(dossier: unknown): Promise<{ report: Record<string, unknown>; model: string }> {

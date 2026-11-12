@@ -2,9 +2,9 @@
 //  Edge Function : nutrition-advice (12/11/2026) — option Assistant IA
 //  Propose au coach des consignes d'alimentation AVANT, PENDANT et APRÈS une
 //  séance, qu'il relit et modifie avant enregistrement (rien n'est envoyé à
-//  l'athlète sans passer par le coach). Modèle : Grok (xAI), via l'API
-//  compatible « chat completions ». Secrets : XAI_API_KEY, XAI_MODEL (facultatif ;
-//  sinon le modèle Grok le plus récent listé par /v1/models).
+//  l'athlète sans passer par le coach). Modèle : le circuit IA existant de
+//  Sillance (_shared/ai.ts : Groq en principal, Anthropic en secours), donc les
+//  mêmes sous-traitants que les résumés de séance, déjà déclarés dans legal.html.
 //  Auth : JWT ; réservé aux coachs avec l'option Assistant IA (has_ai_addon).
 //  Données envoyées : sport, durée, structure et intensité de la séance, et le
 //  poids de l'athlète s'il est connu et que l'athlète n'a pas refusé l'analyse
@@ -13,9 +13,9 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { corsHeaders } from "../_shared/cors.ts";
 import { effortPct } from "../_shared/intensity.ts";
+import { generateJson, AiError } from "../_shared/ai.ts";
 
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-const XAI = "https://api.x.ai/v1";
 
 const SYSTEM = `Tu es nutritionniste du sport et conseilles un entraîneur d'endurance (triathlon, course à pied, vélo, natation, Hyrox).
 Tu reçois UNE séance et tu rédiges des consignes d'alimentation pratiques, en français, tutoiement, ton simple, sans emoji.
@@ -48,19 +48,6 @@ function describe(s: any, refs: any): string {
     lines.length ? `Structure :\n${lines.join("\n")}` : ""].filter(Boolean).join("\n");
 }
 
-async function pickModel(key: string): Promise<string> {
-  const env = Deno.env.get("XAI_MODEL"); if (env) return env;
-  try {
-    const r = await fetch(`${XAI}/models`, { headers: { Authorization: `Bearer ${key}` } });
-    const ids: string[] = ((await r.json())?.data ?? []).map((m: { id: string }) => m.id)
-      .filter((id: string) => /^grok/.test(id) && !/image|vision|imagine|video|code/.test(id));
-    const v = (id: string) => (id.match(/(\d+(?:\.\d+)?)/) || ["0"])[0];
-    ids.sort((a, b) => Number(v(b)) - Number(v(a)) || a.length - b.length);
-    if (ids[0]) return ids[0];
-  } catch { /* repli ci-dessous */ }
-  return "grok-4";
-}
-
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
@@ -70,8 +57,6 @@ Deno.serve(async (req) => {
     if (!uid) return json({ error: "unauthorized" }, 401);
     const { data: ok } = await sb.rpc("has_ai_addon", { uid });
     if (!ok) return json({ error: "add_on_required" }, 402);
-    const key = Deno.env.get("XAI_API_KEY");
-    if (!key) return json({ error: "not_configured", message: "Clé Grok (XAI_API_KEY) absente côté serveur." }, 503);
 
     const body = await req.json().catch(() => ({}));
     // la séance vient soit de la base (id), soit du constructeur (pas encore enregistrée)
@@ -94,13 +79,9 @@ Deno.serve(async (req) => {
       weight = Number(ck?.poids) || null;
     }
     const prompt = describe(s, refs) + (weight ? `\nPoids de l'athlète : ${Math.round(weight)} kg` : "\nPoids de l'athlète : inconnu");
-    const model = await pickModel(key);
-    const r = await fetch(`${XAI}/chat/completions`, { method: "POST", headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ model, temperature: 0.3, max_tokens: 600, messages: [{ role: "system", content: SYSTEM }, { role: "user", content: prompt }] }) });
-    if (!r.ok) { console.error("xAI", r.status, (await r.text()).slice(0, 300)); return json({ error: "provider_error", status: r.status }, 502); }
-    const txt: string = (await r.json())?.choices?.[0]?.message?.content ?? "";
-    const m = txt.match(/\{[\s\S]*\}/); let out;
-    try { out = JSON.parse(m ? m[0] : txt); } catch { return json({ error: "bad_output" }, 502); }
+    let out: Record<string, unknown>, model: string;
+    try { ({ value: out, model } = await generateJson(SYSTEM, prompt, 600)); }
+    catch (e) { console.error("[nutrition-advice] IA", e instanceof AiError ? JSON.stringify(e.attempts) : e); return json({ error: "provider_error" }, 502); }
     const clean = (x: unknown) => String(x ?? "").replace(/[<>]/g, "").trim().slice(0, 400);
     return json({ pre: clean(out.pre), during: clean(out.during), post: clean(out.post), model, weight_used: !!weight });
   } catch (e) { console.error("[nutrition-advice]", e); return json({ error: "server_error" }, 500); }
