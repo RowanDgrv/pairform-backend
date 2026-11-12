@@ -72,7 +72,7 @@ Deno.serve(async (req) => {
     if (athleteId) {
       // seulement pour soi-même ou un athlète que l'on coache
       if (athleteId !== uid) { const { data: link } = await sb.from("coach_athlete").select("id").eq("coach_id", uid).eq("athlete_id", athleteId).eq("status", "active").maybeSingle(); if (!link) return json({ error: "forbidden" }, 403); }
-      const { data: ap } = await sb.from("athlete_profiles").select("vma, seuil_run, ftp, pma, fc_max, ai_consent").eq("user_id", athleteId).maybeSingle();
+      const { data: ap } = await sb.from("athlete_profiles").select("vma, seuil_run, ftp, pma, fc_max, fc_repos, ai_consent").eq("user_id", athleteId).maybeSingle();
       if (ap?.ai_consent === false) return json({ error: "athlete_refused", message: "L'athlète a désactivé l'analyse par l'assistant IA." }, 403);
       refs = ap;
       const { data: ck } = await sb.from("checkins").select("poids").eq("athlete_id", athleteId).not("poids", "is", null).order("created_at", { ascending: false }).limit(1).maybeSingle();

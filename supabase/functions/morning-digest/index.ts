@@ -239,7 +239,7 @@ Deno.serve(async (req) => {
           .eq("athlete_id", p.user_id).eq("type", "shoe");
         const alive: Shoe[] = (pairs ?? []).filter((g) => !g.retired && Number(g.km) < Number(g.max_km))
           .map((g) => ({ name: g.name as string, km: Number(g.km), max_km: Number(g.max_km) || 1, cat: g.cat as string | null, session_types: g.session_types as string[] | null }));
-        const { data: refs } = await supabase.from("athlete_profiles").select("vma, seuil_run, ftp, pma, fc_max").eq("user_id", p.user_id).maybeSingle();
+        const { data: refs } = await supabase.from("athlete_profiles").select("vma, seuil_run, ftp, pma, fc_max, fc_repos").eq("user_id", p.user_id).maybeSingle();
         for (const s of sessions as Session[]) if (s.disc === "run" && !s.shoe_id) s.shoe_name = recommendShoe(s, alive, refs ?? {});
       }
       const gear = gearFor(sessions as Session[], shoes, owned);
@@ -283,7 +283,7 @@ Deno.serve(async (req) => {
       const firstName = me?.first_name || (me?.full_name || "").split(" ")[0] || null;
       // intensité réelle de chaque séance (allures / watts / FC demandés vs références de l'athlète)
       {
-        const { data: rf } = await supabase.from("athlete_profiles").select("vma, seuil_run, ftp, pma, fc_max").eq("user_id", p.user_id).maybeSingle();
+        const { data: rf } = await supabase.from("athlete_profiles").select("vma, seuil_run, ftp, pma, fc_max, fc_repos").eq("user_id", p.user_id).maybeSingle();
         // deno-lint-ignore no-explicit-any
         for (const s of sessions as any[]) s.effort = effortPct(s.blocks, s.disc, rf ?? {});
       }

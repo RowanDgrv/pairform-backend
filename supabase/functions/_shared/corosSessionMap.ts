@@ -1,4 +1,4 @@
-import { isFreeRecovery } from "./intensity.ts";
+import { isFreeRecovery, hrAt } from "./intensity.ts";
 // =============================================================================
 //  Traduit une séance Sillance (scheduled_sessions.blocks — le format du
 //  créateur de séance : blocs à répéter, lignes avec cible en % d'une
@@ -21,7 +21,7 @@ import { isFreeRecovery } from "./intensity.ts";
 export interface AthleteRef {
   ftp?: number | null; pma?: number | null; cp_bike?: number | null;
   vma?: number | null; cv?: number | null; seuil_run?: number | null;
-  css?: number | null; fc_max?: number | null;
+  css?: number | null; fc_max?: number | null; fc_repos?: number | null;
 }
 
 type ModelUnit = "W" | "kmh" | "pace" | "pace100" | "bpm";
@@ -46,6 +46,7 @@ function resolveZoneValue(model: string, pct: number, ref: AthleteRef): { unit: 
   if (!m) return null;
   const base = ref[m.field];
   if (base == null || !Number.isFinite(Number(base))) return null;
+  if (model === "fc") return { unit: m.unit, value: hrAt(pct, Number(base), ref.fc_repos) };   // FC de réserve si repos connu
   return { unit: m.unit, value: (Number(base) * pct) / 100 };
 }
 

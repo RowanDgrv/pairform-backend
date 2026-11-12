@@ -89,7 +89,7 @@ Deno.serve(async (req) => {
     const conn = await decryptConn(connRow);
 
     const { data: ref } = await sb.from("athlete_profiles")
-      .select("ftp, pma, cp_bike, vma, cv, seuil_run, css, fc_max").eq("user_id", session.athlete_id).maybeSingle();
+      .select("ftp, pma, cp_bike, vma, cv, seuil_run, css, fc_max, fc_repos").eq("user_id", session.athlete_id).maybeSingle();
 
     try {
       const result = await pushPlannedSession(

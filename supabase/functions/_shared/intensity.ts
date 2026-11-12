@@ -10,7 +10,7 @@
 //   - sinon : % de FC max.
 //  Repères : ≥ 90 % VMA = fractionné (Z5), 80-90 % = seuil / tempo (Z4).
 // =============================================================================
-export type Refs = { vma?: number | null; seuil_run?: number | null; ftp?: number | null; pma?: number | null; fc_max?: number | null };
+export type Refs = { vma?: number | null; seuil_run?: number | null; ftp?: number | null; pma?: number | null; fc_max?: number | null; fc_repos?: number | null };
 // deno-lint-ignore no-explicit-any
 type Line = Record<string, any>;
 
@@ -29,7 +29,7 @@ export function linePct(l: Line, disc: string, r: Refs): number | null {
       return null;
     }
     if (e.kind === "power") return ftp ? (Number(e.w) / ftp) * 100 : null;
-    if (e.kind === "hr") return fcmax ? (((Number(e.lo) + Number(e.hi || e.lo)) / 2) / fcmax) * 100 : null;
+    if (e.kind === "hr") return fcmax ? pctOfHr((Number(e.lo) + Number(e.hi || e.lo)) / 2, fcmax, r.fc_repos) : null;
   }
   if (l.mode === "zone" && Number(l.pct) > 0) {
     const p = Number(l.pct);
@@ -76,4 +76,18 @@ export function isFreeRecovery(l: any): boolean {
   if (l.metric === "dist") return (Number(l.dist) || 0) <= 400;
   const sec = (Number(l.dur?.h) || 0) * 3600 + (Number(l.dur?.m) || 0) * 60 + (Number(l.dur?.s) || 0);
   return sec > 0 && sec <= 180;
+}
+
+/* Zones de FC en % de la FC de réserve (Karvonen) quand la FC de repos est connue (13/11/2026) :
+   bpm = repos + % × (max − repos). En % de FC max brut, la Z2 d'un coureur entraîné
+   (ex. 117-137 bpm pour 195 de max) tombait sous ses footings réels (~140). Sans FC de
+   repos, on garde le % de FC max. */
+export function restOk(max: number, rest?: number | null): number | null {
+  const r = Number(rest) || 0; return r >= 30 && r < max - 40 ? r : null;
+}
+export function hrAt(pct: number, max: number, rest?: number | null): number {
+  const r = restOk(max, rest); return r ? r + (pct / 100) * (max - r) : (pct / 100) * max;
+}
+export function pctOfHr(bpm: number, max: number, rest?: number | null): number {
+  const r = restOk(max, rest); return r ? ((bpm - r) / (max - r)) * 100 : (bpm / max) * 100;
 }

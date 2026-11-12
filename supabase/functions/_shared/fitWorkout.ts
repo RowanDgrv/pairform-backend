@@ -1,4 +1,4 @@
-import { isFreeRecovery } from "./intensity.ts";
+import { isFreeRecovery, hrAt } from "./intensity.ts";
 // =============================================================================
 //  _shared/fitWorkout.ts — séance Sillance → fichier .FIT « workout » (Garmin)
 //  ---------------------------------------------------------------------------
@@ -29,7 +29,7 @@ export type FitLine = {
 };
 export type FitBlock = { series?: number; title?: string; lines?: FitLine[] };
 export type FitSession = { title?: string; disc?: string; blocks?: FitBlock[] };
-export type FitRefs = { ftp?: number | null; pma?: number | null; cpBike?: number | null; vma?: number | null; cv?: number | null; seuilRun?: number | null; fcMax?: number | null };
+export type FitRefs = { ftp?: number | null; pma?: number | null; cpBike?: number | null; vma?: number | null; cv?: number | null; seuilRun?: number | null; fcMax?: number | null; fcRepos?: number | null };
 
 const SPORT_BY_DISC: Record<string, string> = { run: "running", bike: "cycling", swim: "swimming", strength: "training", hyrox: "training" };
 const INTENSITY_BY_TYPE: Record<string, string> = { warmup: "warmup", cooldown: "cooldown", recov: "recovery", exo: "active", contre: "active", educatif: "active" };
@@ -74,7 +74,7 @@ function targetOf(ln: FitLine, disc: string, refs: FitRefs): Target {
     const base = (v: number | null | undefined) => (v != null && Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : null);
     const W = ln.model === "ftp" ? base(refs.ftp) : ln.model === "pma" ? base(refs.pma) : ln.model === "cpBike" ? base(refs.cpBike) : null;
     if (W) return powT(W * lo, W * hi);
-    if (ln.model === "fc" && base(refs.fcMax)) return hrT(base(refs.fcMax)! * lo, base(refs.fcMax)! * hi);
+    if (ln.model === "fc" && base(refs.fcMax)) return hrT(hrAt(lo * 100, base(refs.fcMax)!, refs.fcRepos), hrAt(hi * 100, base(refs.fcMax)!, refs.fcRepos));
     const K = ln.model === "vma" ? base(refs.vma) : ln.model === "cv" ? base(refs.cv) : null;   // km/h
     if (K && disc === "run") return speedT(K * lo / 3.6, K * hi / 3.6);
     // seuil en allure (s/km) : % appliqué à la durée au km, comme le constructeur

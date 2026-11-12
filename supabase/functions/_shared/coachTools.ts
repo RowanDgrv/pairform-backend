@@ -109,7 +109,7 @@ export async function programSession(sb: SupabaseClient, coachId: string, a: Rec
   if (!blocsIn.length) return "Ajoute au moins un bloc avec ses lignes.";
   if (await writeQuotaExceeded(sb, coachId)) return "Trop d'écritures récentes : réessaie dans quelques minutes.";
 
-  const { data: refs } = await sb.from("athlete_profiles").select("vma, seuil_run, ftp, pma, fc_max").eq("user_id", found.ath.id).maybeSingle();
+  const { data: refs } = await sb.from("athlete_profiles").select("vma, seuil_run, ftp, pma, fc_max, fc_repos").eq("user_id", found.ath.id).maybeSingle();
   const blocks: Record<string, unknown>[] = []; let totMin = 0, tss = 0, maxPct = 0;
   for (const b of blocsIn) {
     const series = Math.max(1, Math.min(40, Math.round(Number(b.repetitions) || 1)));
