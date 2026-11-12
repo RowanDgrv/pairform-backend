@@ -1,3 +1,4 @@
+import { isFreeRecovery } from "./intensity.ts";
 // =============================================================================
 //  _shared/fitWorkout.ts — séance Sillance → fichier .FIT « workout » (Garmin)
 //  ---------------------------------------------------------------------------
@@ -49,6 +50,7 @@ const powT = (lo: number, hi: number): Target => ({ type: "power", low: Math.rou
 
 /** Cible FIT d'une ligne (open si rien de fiable). */
 function targetOf(ln: FitLine, disc: string, refs: FitRefs): Target {
+  if (isFreeRecovery(ln)) return { type: "open" };   // récup courte : libre
   const ex = ln.mode === "exact" ? ln.exact : null;
   if (ex) {
     const tol = Number(ex.tol) || 0;

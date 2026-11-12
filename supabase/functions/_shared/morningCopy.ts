@@ -13,7 +13,7 @@
 //  le même jour donne la même. Aucun tiret long dans les textes.
 // =============================================================================
 
-export type CopySession = { title: string; disc: string; dur: number; zone: string | null };
+export type CopySession = { title: string; disc: string; dur: number; zone: string | null; effort?: number | null };
 export type CopyContext = { firstName: string | null; coachFirstName: string | null; day: string; userId: string };
 
 const INTENSE_RE = /vma|vo2|seuil|intervalle|fractionn|lt2|tempo|allure|30\/30/i;
@@ -25,7 +25,10 @@ export function sessionKind(sessions: CopySession[]): string {
   if (s.disc === "strength") return "strength";
   if (s.disc === "swim") return "swim";
   if ((s.dur ?? 0) >= 120 || /longue|\bld\b|sortie longue/.test(t)) return "long";
-  if (["Z4", "Z5"].includes(s.zone ?? "") || INTENSE_RE.test(t)) return "intense";
+  // effort = % de la partie la plus dure (VMA, FTP ou FC max), calculé depuis les blocs (13/11/2026) :
+  // « 5 × 3' à 3:10 » est intense même si la séance a été enregistrée en Z2.
+  if ((s.effort ?? 0) >= 85 || ["Z4", "Z5"].includes(s.zone ?? "") || INTENSE_RE.test(t)) return "intense";
+  if ((s.effort ?? 0) >= 77) return "easy";
   if (s.zone === "Z1" || /r[ée]cup|d[ée]crassage/.test(t)) return "recup";
   return "easy";
 }

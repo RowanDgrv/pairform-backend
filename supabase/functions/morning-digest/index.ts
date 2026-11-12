@@ -17,7 +17,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import * as webpush from "jsr:@negrel/webpush@0.3.0";
 import { corsHeaders } from "../_shared/cors.ts";
 import { sendEmail } from "../_shared/email.ts";
-import { runKind, type Refs } from "../_shared/intensity.ts";
+import { runKind, effortPct, type Refs } from "../_shared/intensity.ts";
 import { sendFcmPush } from "../_shared/fcm.ts";
 import { sendApnsPush } from "../_shared/apns.ts";
 
@@ -281,6 +281,12 @@ Deno.serve(async (req) => {
         coachFirst = c?.first_name || (c?.full_name || "").split(" ")[0] || null;
       }
       const firstName = me?.first_name || (me?.full_name || "").split(" ")[0] || null;
+      // intensité réelle de chaque séance (allures / watts / FC demandés vs références de l'athlète)
+      {
+        const { data: rf } = await supabase.from("athlete_profiles").select("vma, seuil_run, ftp, pma, fc_max").eq("user_id", p.user_id).maybeSingle();
+        // deno-lint-ignore no-explicit-any
+        for (const s of sessions as any[]) s.effort = effortPct(s.blocks, s.disc, rf ?? {});
+      }
       const copy = morningCopy(sessions as Session[], { firstName, coachFirstName: coachFirst, day: now.day, userId: p.user_id });
       const title = copy.subject;
       // commentaire du coach sur la séance (05/11/2026) : « Le mot de Rowan »

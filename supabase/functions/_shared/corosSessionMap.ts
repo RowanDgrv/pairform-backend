@@ -1,3 +1,4 @@
+import { isFreeRecovery } from "./intensity.ts";
 // =============================================================================
 //  Traduit une séance Sillance (scheduled_sessions.blocks — le format du
 //  créateur de séance : blocs à répéter, lignes avec cible en % d'une
@@ -115,7 +116,7 @@ function lineToSection(line: any, disc: string, ref: AthleteRef): any | null {
     targetValue = Math.round(Number(line.dist) || 0);
     if (!targetValue) return null;
   } // 'reps' (renfo) : pas de cible temps/distance → free mode, targetValue omis
-  const intensity = lineIntensity(line, disc, ref);
+  const intensity = isFreeRecovery(line) ? {} : lineIntensity(line, disc, ref);   // récup courte : libre
   return {
     sectionType: SECTION_TYPE[line.type] || 2,
     targetType,
@@ -176,6 +177,7 @@ function durTxt(l: any): string {
   return h ? `${h}h${String(m).padStart(2, "0")}` : s ? `${m}'${String(s).padStart(2, "0")}` : `${m} min`;
 }
 function tgtTxt(l: any): string {
+  if (isFreeRecovery(l)) return "libre (trot)";
   if (l.mode === "exact" && l.exact) {
     const e = l.exact;
     if (e.kind === "hr") return `${e.lo}-${e.hi} bpm`;

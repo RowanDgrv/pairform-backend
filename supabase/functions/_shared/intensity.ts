@@ -64,3 +64,16 @@ export function runKind(blocks: unknown, r: Refs): "interval" | "tempo" | "easy"
   if (p == null) return null;
   return p >= 90 ? "interval" : p >= 77 ? "tempo" : "easy";   // 77 % : allure marathon et au-dessus
 }
+
+/* Récupération libre (13/11/2026) : une récup de 3 min ou moins (ou 400 m) n'a pas de
+   cible chiffrée, sauf allure / watts / FC tapés à la main par le coach (mode exact).
+   Sur 1' de trot entre deux efforts, la FC n'a pas le temps de redescendre : une cible
+   « Z1 » ferait biper la montre et compterait la séance comme non respectée. */
+// deno-lint-ignore no-explicit-any
+export function isFreeRecovery(l: any): boolean {
+  if (!l || !["recov", "rec", "recup", "recovery", "repos"].includes(l.type)) return false;
+  if (l.mode === "exact") return false;
+  if (l.metric === "dist") return (Number(l.dist) || 0) <= 400;
+  const sec = (Number(l.dur?.h) || 0) * 3600 + (Number(l.dur?.m) || 0) * 60 + (Number(l.dur?.s) || 0);
+  return sec > 0 && sec <= 180;
+}
