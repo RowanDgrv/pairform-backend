@@ -7,6 +7,7 @@
 //  Écritures : scheduled_sessions (format du constructeur), journalisées dans
 //  assistant_writes avec l'image avant/après.
 // =============================================================================
+import { effortPct, zoneFromPct, linePct } from "./intensity.ts";
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { logWrite, writeQuotaExceeded } from "./assistant.ts";
 
@@ -62,7 +63,7 @@ type Ligne = { type?: string; duree_min?: number; distance_m?: number; reps?: nu
   zone?: string; pct?: number; reference?: string; bpm_min?: number; bpm_max?: number; allure?: string; watts?: number; rpe?: number };
 type Bloc = { repetitions?: number; titre?: string; lignes?: Ligne[] };
 
-function toLine(l: Ligne, disc: string): { line: Record<string, unknown>; min: number; ifac: number } | string {
+function toLine(l: Ligne, disc: string, refs: Record<string, number | null> = {}): { line: Record<string, unknown>; min: number; ifac: number } | string {
   const type = TYPE[norm(l.type || "effort").replace(/ /g, "_")] || "exo";
   const line: Record<string, unknown> = { type, rpe: l.rpe ?? undefined };
   let min = 0;
@@ -89,6 +90,8 @@ function toLine(l: Ligne, disc: string): { line: Record<string, unknown>; min: n
   } else if (l.zone && ZONE_MID[l.zone.toUpperCase()]) {
     line.mode = "zone"; line.model = "fc"; line.pct = ZONE_MID[l.zone.toUpperCase()]; line.pctTol = 5; pct = line.pct as number;
   } else if (line.metric !== "reps") { line.mode = "zone"; line.model = "fc"; line.pct = type === "exo" ? 75 : 60; line.pctTol = 5; pct = line.pct as number; }
+  // allure, watts ou FC exacts : intensité réelle par rapport aux références de l'athlète (12/11/2026)
+  if (line.mode === "exact") { const real = linePct(line, disc, refs); if (real != null) pct = real; }
   const ifac = Math.min(1.1, Math.max(0.5, (pct || 65) / 100));
   return { line, min, ifac };
 }
@@ -106,12 +109,13 @@ export async function programSession(sb: SupabaseClient, coachId: string, a: Rec
   if (!blocsIn.length) return "Ajoute au moins un bloc avec ses lignes.";
   if (await writeQuotaExceeded(sb, coachId)) return "Trop d'écritures récentes : réessaie dans quelques minutes.";
 
+  const { data: refs } = await sb.from("athlete_profiles").select("vma, seuil_run, ftp, pma, fc_max").eq("user_id", found.ath.id).maybeSingle();
   const blocks: Record<string, unknown>[] = []; let totMin = 0, tss = 0, maxPct = 0;
   for (const b of blocsIn) {
     const series = Math.max(1, Math.min(40, Math.round(Number(b.repetitions) || 1)));
     const lines: Record<string, unknown>[] = [];
     for (const l of b.lignes || []) {
-      const r = toLine(l, disc);
+      const r = toLine(l, disc, refs ?? {});
       if (typeof r === "string") return r;
       lines.push(r.line); totMin += r.min * series; tss += (r.min * series / 60) * r.ifac * r.ifac * 100;
       maxPct = Math.max(maxPct, Number(r.line.pct) || 0);
@@ -123,7 +127,9 @@ export async function programSession(sb: SupabaseClient, coachId: string, a: Rec
     lines.forEach((ln, li) => { ln.lid = `la${bi}_${li}_${Date.now().toString(36)}`; });
     blocks.push({ bid: `ba${bi}_${Date.now().toString(36)}`, series, title: String(b.titre || "").slice(0, 60), lines });
   }
-  const zone = maxPct >= 90 ? "Z5" : maxPct >= 80 ? "Z4" : maxPct >= 70 ? "Z3" : maxPct >= 60 ? "Z2" : "Z1";
+  // zone = la partie la plus dure, allures exactes comprises (avant : ignorées, un 5 × 3' à 3:10 sortait en Z2)
+  const eff = effortPct(blocks, disc, refs ?? {});
+  const zone = zoneFromPct(Math.max(maxPct, eff ?? 0));
   const row = { athlete_id: found.ath.id, created_by: coachId, date, disc, title: String(a.titre || "Séance").slice(0, 100),
     dur: Math.round(totMin), dist: 0, tss: Math.round(tss), zone, blocks, coach_note: a.note_coach ? String(a.note_coach).slice(0, 500) : null };
   const { data, error } = await sb.from("scheduled_sessions").insert(row).select("id").single();

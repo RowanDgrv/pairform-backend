@@ -17,6 +17,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import * as webpush from "jsr:@negrel/webpush@0.3.0";
 import { corsHeaders } from "../_shared/cors.ts";
 import { sendEmail } from "../_shared/email.ts";
+import { runKind, type Refs } from "../_shared/intensity.ts";
 import { sendFcmPush } from "../_shared/fcm.ts";
 import { sendApnsPush } from "../_shared/apns.ts";
 
@@ -36,7 +37,7 @@ const GEAR_TAGS: Record<string, string> = {
   "longue": "ravitaillement (gels/barres)",
 };
 
-type Session = { title: string; disc: string; dur: number; zone: string | null; shoe_id?: string | null; gear?: string[] | null; shoe_name?: string | null };
+type Session = { title: string; disc: string; dur: number; zone: string | null; shoe_id?: string | null; gear?: string[] | null; shoe_name?: string | null; blocks?: unknown };
 // libellés du catalogue de matériel (miroir de sillance-equipment.js, FR)
 const EQUIP_LABEL: Record<string, string> = {
   rain_jacket: "veste de pluie", headlamp: "lampe frontale", run_belt: "ceinture porte-flasques", trail_poles: "bâtons de trail",
@@ -128,11 +129,14 @@ function gearFor(sessions: Session[], shoes: Map<string, string> = new Map(), ow
 // sur la paire, sinon sa catégorie), la moins usée d'abord. Avant, le mail
 // disait juste « baskets » alors que l'app conseillait déjà une paire.
 type Shoe = { name: string; km: number; max_km: number; cat: string | null; session_types: string[] | null };
-function recommendShoe(s: Session, shoes: Shoe[]): string | null {
+function recommendShoe(s: Session, shoes: Shoe[], refs: Refs = {}): string | null {
   if (s.disc !== "run" || !shoes.length) return null;
   const t = (s.title ?? "").toLowerCase();
   let want: "race" | "interval" | "tempo" | "easy";
+  // 12/11/2026 : les allures des blocs comparées à la VMA ou à l'allure seuil priment sur le titre et la zone
+  const byPace = runKind(s.blocks, refs);
   if (/comp[ée]t|course|marathon|semi|10k|5k|race/.test(t)) want = "race";
+  else if (byPace) want = byPace;
   else if (/vma|fractionn|interval|r[ée]p[ée]tition/.test(t) || s.zone === "Z5") want = "interval";
   else if (/seuil|tempo|vo2|dynamique|allure/.test(t) || s.zone === "Z4") want = "tempo";
   else want = "easy";
@@ -212,7 +216,7 @@ Deno.serve(async (req) => {
       // séances planifiées AUJOURD'HUI (heure locale de l'athlète)
       const { data: sessions } = await supabase
         .from("scheduled_sessions")
-        .select("title, disc, dur, zone, shoe_id, gear, coach_note")
+        .select("title, disc, dur, zone, shoe_id, gear, coach_note, blocks")
         .eq("athlete_id", p.user_id)
         .eq("date", now.day)
         .eq("done", false);
@@ -235,7 +239,8 @@ Deno.serve(async (req) => {
           .eq("athlete_id", p.user_id).eq("type", "shoe");
         const alive: Shoe[] = (pairs ?? []).filter((g) => !g.retired && Number(g.km) < Number(g.max_km))
           .map((g) => ({ name: g.name as string, km: Number(g.km), max_km: Number(g.max_km) || 1, cat: g.cat as string | null, session_types: g.session_types as string[] | null }));
-        for (const s of sessions as Session[]) if (s.disc === "run" && !s.shoe_id) s.shoe_name = recommendShoe(s, alive);
+        const { data: refs } = await supabase.from("athlete_profiles").select("vma, seuil_run, ftp, pma, fc_max").eq("user_id", p.user_id).maybeSingle();
+        for (const s of sessions as Session[]) if (s.disc === "run" && !s.shoe_id) s.shoe_name = recommendShoe(s, alive, refs ?? {});
       }
       const gear = gearFor(sessions as Session[], shoes, owned);
       // Veste de pluie si pluie probable en journée et séance dehors (05/11/2026)
