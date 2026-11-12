@@ -50,7 +50,7 @@ const LIGNE = { type: "object", properties: {
   reps: { type: "number", description: "Muscu : nombre de répétitions" },
   exercice: { type: "string", description: "Muscu : nom de l'exercice (ex. Squat bulgare)" },
   charge_kg: { type: "number", description: "Muscu : charge en kg" },
-  zone: { type: "string", description: "Zone Z1 à Z5 (en % de FC max par défaut)" },
+  zone: { type: "string", description: "Zone Z1 à Z5 (en % de FC max par défaut). Footing, échauffement, retour au calme et récupération : Z2 par défaut. Ne mets Z1 que si le coach le demande explicitement. Une récupération de 3 min ou moins entre des répétitions est libre : ne lui donne pas de zone." },
   pct: { type: "number", description: "Intensité en % d'une référence de l'athlète (avec reference)" },
   reference: { type: "string", enum: ["vma", "ftp", "fc", "pma", "seuil", "cv", "pc"], description: "Référence pour pct" },
   bpm_min: { type: "number" }, bpm_max: { type: "number" },

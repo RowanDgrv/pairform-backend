@@ -89,7 +89,7 @@ function toLine(l: Ligne, disc: string, refs: Record<string, number | null> = {}
     line.mode = "zone"; line.model = model; line.pct = Number(l.pct); line.pctTol = 2; pct = Number(l.pct);
   } else if (l.zone && ZONE_MID[l.zone.toUpperCase()]) {
     line.mode = "zone"; line.model = "fc"; line.pct = ZONE_MID[l.zone.toUpperCase()]; line.pctTol = 5; pct = line.pct as number;
-  } else if (line.metric !== "reps") { line.mode = "zone"; line.model = "fc"; line.pct = type === "exo" ? 75 : 60; line.pctTol = 5; pct = line.pct as number; }
+  } else if (line.metric !== "reps") { line.mode = "zone"; line.model = "fc"; line.pct = type === "exo" ? 75 : 65; line.pctTol = 5; pct = line.pct as number; }   // sans précision : Z2 (13/11/2026)
   // allure, watts ou FC exacts : intensité réelle par rapport aux références de l'athlète (12/11/2026)
   if (line.mode === "exact") { const real = linePct(line, disc, refs); if (real != null) pct = real; }
   const ifac = Math.min(1.1, Math.max(0.5, (pct || 65) / 100));
