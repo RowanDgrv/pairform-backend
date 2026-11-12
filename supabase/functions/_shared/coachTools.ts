@@ -131,7 +131,9 @@ export async function programSession(sb: SupabaseClient, coachId: string, a: Rec
   const eff = effortPct(blocks, disc, refs ?? {});
   const zone = zoneFromPct(Math.max(maxPct, eff ?? 0));
   const row = { athlete_id: found.ath.id, created_by: coachId, date, disc, title: String(a.titre || "Séance").slice(0, 100),
-    dur: Math.round(totMin), dist: 0, tss: Math.round(tss), zone, blocks, coach_note: a.note_coach ? String(a.note_coach).slice(0, 500) : null };
+    dur: Math.round(totMin), dist: 0, tss: Math.round(tss), zone, blocks, coach_note: a.note_coach ? String(a.note_coach).slice(0, 500) : null,
+    // consignes nutrition (0097) : seulement si le coach en donne
+    ...((a.nutrition_avant || a.nutrition_pendant || a.nutrition_apres) ? { nutrition: { pre: String(a.nutrition_avant || "").slice(0, 400), during: String(a.nutrition_pendant || "").slice(0, 400), post: String(a.nutrition_apres || "").slice(0, 400) } } : {}) };
   const { data, error } = await sb.from("scheduled_sessions").insert(row).select("id").single();
   await logWrite(sb, { athleteId: coachId, op: "coach.session.create", targetId: data?.id ?? null, params: { athlete: found.ath.id, date }, after: row, ok: !error, error: error?.message ?? null });
   if (error) return `Séance non créée : ${error.message}`;

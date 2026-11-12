@@ -216,7 +216,7 @@ Deno.serve(async (req) => {
       // séances planifiées AUJOURD'HUI (heure locale de l'athlète)
       const { data: sessions } = await supabase
         .from("scheduled_sessions")
-        .select("title, disc, dur, zone, shoe_id, gear, coach_note, blocks")
+        .select("title, disc, dur, zone, shoe_id, gear, coach_note, blocks, nutrition, created_by")
         .eq("athlete_id", p.user_id)
         .eq("date", now.day)
         .eq("done", false);
@@ -253,7 +253,24 @@ Deno.serve(async (req) => {
           weatherLine = `La météo annonce de la pluie entre ${rain.from} h et ${rain.to} h : prévois ta veste de pluie.`;
         }
       }
-      const nutri = nutriFor(sessions as Session[]);
+      // Nutrition (12/11/2026) : uniquement les consignes écrites (ou validées) par le coach, et seulement
+      // si ce coach n'a pas masqué la nutrition à ses athlètes. Plus de texte générique inventé.
+      let nutri = "";
+      {
+        // deno-lint-ignore no-explicit-any
+        const ss = sessions as any[];
+        const creators = [...new Set(ss.map((x) => x.created_by).filter(Boolean))];
+        const { data: cp } = creators.length ? await supabase.from("profiles").select("id, show_nutrition").in("id", creators) : { data: [] };
+        const hidden = new Set((cp ?? []).filter((c: { show_nutrition: boolean }) => c.show_nutrition === false).map((c: { id: string }) => c.id));
+        const parts: string[] = [];
+        for (const x of ss) {
+          if (x.created_by && hidden.has(x.created_by)) continue;
+          const n = x.nutrition || {};
+          const t = [n.pre && "avant : " + n.pre, n.during && "pendant : " + n.during, n.post && "après : " + n.post].filter(Boolean).join(" ; ");
+          if (t) parts.push(ss.length > 1 ? `${x.title} (${t})` : t);
+        }
+        nutri = parts.join(" · ").slice(0, 700);
+      }
       // Textes variés du jour (05/11/2026) : prénom de l'athlète, prénom du
       // coach qui signe, accroche selon la séance et le jour de la semaine.
       const { data: me } = await supabase.from("profiles").select("email, first_name, full_name").eq("id", p.user_id).single();
@@ -359,7 +376,7 @@ function digestHtml(copy: ReturnType<typeof morningCopy>, lines: string[], gear:
     <ul style="line-height:1.7;padding-left:20px">${lines.map((l) => `<li>${escapeHtml(l)}</li>`).join("")}</ul>
     <p><b>${escapeHtml(copy.gearLabel)}</b> ${gear.map(escapeHtml).join(", ")}</p>
     ${weatherLine ? `<p style="background:#eef4fb;border-radius:10px;padding:12px 14px">☔ ${escapeHtml(weatherLine)}</p>` : ""}
-    <p style="background:#f0f7f4;border-radius:10px;padding:12px 14px"><b>${escapeHtml(copy.nutriLabel)}</b> ${escapeHtml(nutri)}</p>
+    ${nutri ? `<p style="background:#f0f7f4;border-radius:10px;padding:12px 14px"><b>${escapeHtml(copy.nutriLabel)}</b> ${escapeHtml(nutri)}</p>` : ""}
     ${notes.length
       ? `<p style="border-left:3px solid #0B7285;padding:4px 0 4px 14px"><span style="font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#0B7285;font-weight:700">Le mot de ${escapeHtml(coach || "ton coach")}</span><br>${notes.map(escapeHtml).join("<br>")}</p><p>${escapeHtml(copy.signature)}</p>`
       : `<p>${escapeHtml(copy.closing)}<br>${escapeHtml(copy.signature)}</p>`}
