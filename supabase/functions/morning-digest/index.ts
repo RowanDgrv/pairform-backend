@@ -443,13 +443,85 @@ Deno.serve(async (req) => {
         console.error("morning-digest: erreur pour", p.user_id, e);
       }
     }
-    return json({ ok: true, sent, skipped, failed });
+    // --- Rappel de la veille (13/11/2026, option de l'athlète) ---------------------------
+    // À l'heure choisie la veille : « C'est prévu pour demain : … Prépare ton sac : … »,
+    // même canal que le rappel du matin, lien vers le récap de la séance de demain.
+    let eveSent = 0;
+    const { data: eprefs } = await supabase.from("notification_prefs")
+      .select("user_id, tz, channel, eve_enabled, eve_hour, eve_minute, eve_last_sent_on")
+      .eq("eve_enabled", true).neq("channel", "none");
+    for (const p of eprefs ?? []) {
+      try {
+        const now = localNow(p.tz || "Europe/Paris");
+        const inWin = now.h === p.eve_hour && now.m >= p.eve_minute && now.m < p.eve_minute + 15;
+        if (!inWin || p.eve_last_sent_on === now.day) continue;
+        const d = new Date(now.day + "T12:00:00Z"); d.setUTCDate(d.getUTCDate() + 1);
+        const tomorrow = d.toISOString().slice(0, 10);
+        const { data: ss } = await supabase.from("scheduled_sessions").select("title, disc, dur, zone, shoe_id, gear, blocks")
+          .eq("athlete_id", p.user_id).eq("date", tomorrow).eq("done", false);
+        if (!ss?.length) continue;
+        const shoes = new Map<string, string>();
+        const ids = [...new Set(ss.map((x) => x.shoe_id).filter(Boolean))] as string[];
+        if (ids.length) { const { data: g } = await supabase.from("gear").select("id, name").in("id", ids); (g ?? []).forEach((x) => shoes.set(x.id, x.name)); }
+        const { data: eq } = await supabase.from("athlete_equipment").select("item_key").eq("athlete_id", p.user_id);
+        const gear = gearFor(ss as Session[], shoes, new Set((eq ?? []).map((r) => r.item_key as string)));
+        const what = ss.map((x) => `${x.title} (${fmtDur(x.dur ?? 0)}${x.zone ? " · " + x.zone : ""})`).join(" + ");
+        const title = ss.length > 1 ? `Demain : ${ss.length} séances` : `Demain : ${ss[0].title}`;
+        const body = `C'est prévu pour demain : ${what}.${gear.length ? ` Prépare ton sac : ${gear.join(", ")}.` : ""}`;
+        const url = `./sillance-app.html?jour=${tomorrow}`;
+        const { data: me } = await supabase.from("profiles").select("email, first_name, full_name").eq("id", p.user_id).single();
+        const first = me?.first_name || (me?.full_name || "").split(" ")[0] || "";
+        const [eOk, pOk] = await Promise.all([
+          (p.channel === "email" || p.channel === "both") && me?.email
+            ? sendEmail({ to: me.email, subject: title, html: eveHtml(first, what, gear, tomorrow) }) : Promise.resolve(false),
+          (p.channel === "push" || p.channel === "both") ? pushToUser(supabase, appServer, p.user_id, title, body, url) : Promise.resolve(false),
+        ]);
+        if (eOk || pOk) { await supabase.from("notification_prefs").update({ eve_last_sent_on: now.day }).eq("user_id", p.user_id); eveSent++; }
+      } catch (e) { console.error("rappel de la veille : erreur pour", p.user_id, e); }
+    }
+    return json({ ok: true, sent, skipped, failed, eveSent });
   } catch (e) {
     console.error(e);
     return json({ error: "Erreur serveur" }, 500);
   }
 });
 
+/** Envoie une notification sur tous les appareils d'un utilisateur (web, Android, iOS). */
+// deno-lint-ignore no-explicit-any
+async function pushToUser(supabase: any, appServer: webpush.ApplicationServer | null, uid: string, title: string, body: string, url: string): Promise<boolean> {
+  const { data: subs } = await supabase.from("push_subscriptions").select("id, endpoint, p256dh, auth, platform").eq("user_id", uid);
+  let ok = false;
+  for (const s of subs ?? []) {
+    try {
+      if (s.platform === "android" || s.platform === "ios") {
+        const r = s.platform === "android" ? await sendFcmPush(s.endpoint, { title, body, data: { type: "eve_reminder" } })
+          : await sendApnsPush(s.endpoint, { title, body, data: { type: "eve_reminder" } });
+        if (r.ok) ok = true; else if (r.deadToken) await supabase.from("push_subscriptions").delete().eq("id", s.id);
+        continue;
+      }
+      if (!appServer) continue;
+      const sub = appServer.subscribe({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } });
+      await sub.pushTextMessage(JSON.stringify({ title, body, url }), {});
+      ok = true;
+    } catch (e) {
+      const msg = String(e);
+      if (msg.includes("404") || msg.includes("410")) await supabase.from("push_subscriptions").delete().eq("id", s.id);
+      else console.warn("push KO:", String(s.endpoint).slice(0, 40), msg.slice(0, 120));
+    }
+  }
+  return ok;
+}
+function eveHtml(first: string, what: string, gear: string[], day: string): string {
+  return `
+  <div style="font-family:system-ui,Segoe UI,sans-serif;max-width:520px;margin:0 auto;color:#0f1720;font-size:16px;line-height:1.6">
+    <p>Bonsoir${first ? " " + escapeHtml(first) : ""},</p>
+    <p>C'est prévu pour demain : <b>${escapeHtml(what)}</b>.</p>
+    ${gear.length ? `<p style="margin-bottom:4px"><b>Prépare ton sac ce soir</b></p><ul style="line-height:1.7;padding-left:20px;margin-top:4px">${gear.map((g) => `<li>${escapeHtml(g)}</li>`).join("")}</ul>` : ""}
+    <p style="margin:18px 0"><a href="https://sillance.app/sillance-app.html?jour=${day}" style="display:inline-block;background:#0B7285;color:#fff;text-decoration:none;font-weight:700;padding:12px 18px;border-radius:10px">Voir la séance de demain</a></p>
+    <p>Bonne soirée, et dors bien.<br>L'équipe Sillance</p>
+    <p style="font-size:12px;color:#6b7682;margin-top:24px">Tu reçois ce mail car le rappel de la veille est activé dans Sillance. Tu peux changer l'heure ou le couper à tout moment dans Paramètres > Rappels.</p>
+  </div>`;
+}
 function digestHtml(copy: ReturnType<typeof morningCopy>, lines: string[], gear: string[], nutri: string, notes: string[] = [], coach: string | null = null, weatherLine = "", steps: string[] = [], day = ""): string {
   return `
   <div style="font-family:system-ui,Segoe UI,sans-serif;max-width:520px;margin:0 auto;color:#0f1720;font-size:16px;line-height:1.6">
