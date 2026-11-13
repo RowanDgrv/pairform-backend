@@ -384,7 +384,7 @@ Deno.serve(async (req) => {
             return await sendEmail({
               to: me.email,
               subject: title,
-              html: digestHtml(copy, lines, gear, nutri, notes, coachFirst, weatherLine, steps),
+              html: digestHtml(copy, lines, gear, nutri, notes, coachFirst, weatherLine, steps, now.day),
             });
           })(),
           (async () => {
@@ -415,7 +415,7 @@ Deno.serve(async (req) => {
                   keys: { p256dh: s.p256dh, auth: s.auth },
                 });
                 await subscriber.pushTextMessage(JSON.stringify({
-                  title, body: bodyTxt, url: "./sillance-app.html",
+                  title, body: bodyTxt, url: `./sillance-app.html?jour=${now.day}`,   // ouvre le récap de la séance du jour (13/11/2026)
                 }), {});
                 ok = true;
               } catch (e) {
@@ -450,13 +450,14 @@ Deno.serve(async (req) => {
   }
 });
 
-function digestHtml(copy: ReturnType<typeof morningCopy>, lines: string[], gear: string[], nutri: string, notes: string[] = [], coach: string | null = null, weatherLine = "", steps: string[] = []): string {
+function digestHtml(copy: ReturnType<typeof morningCopy>, lines: string[], gear: string[], nutri: string, notes: string[] = [], coach: string | null = null, weatherLine = "", steps: string[] = [], day = ""): string {
   return `
   <div style="font-family:system-ui,Segoe UI,sans-serif;max-width:520px;margin:0 auto;color:#0f1720;font-size:16px;line-height:1.6">
     <p>${escapeHtml(copy.greeting)}</p>
     <p>${copy.weekdayLine ? escapeHtml(copy.weekdayLine) + " " : ""}${escapeHtml(copy.intro)}</p>
     <ul style="line-height:1.7;padding-left:20px">${lines.map((l) => `<li>${escapeHtml(l)}</li>`).join("")}</ul>
     ${steps.length ? `<p style="margin-bottom:4px"><b>Le déroulé</b></p><ol style="line-height:1.7;padding-left:22px;margin-top:4px">${steps.map((x) => `<li>${escapeHtml(x)}</li>`).join("")}</ol>` : ""}
+    ${day ? `<p style="margin:18px 0"><a href="https://sillance.app/sillance-app.html?jour=${day}" style="display:inline-block;background:#0B7285;color:#fff;text-decoration:none;font-weight:700;padding:12px 18px;border-radius:10px">Voir ma séance du jour</a></p>` : ""}
     <p><b>${escapeHtml(copy.gearLabel)}</b> ${gear.map(escapeHtml).join(", ")}</p>
     ${weatherLine ? `<p style="background:#eef4fb;border-radius:10px;padding:12px 14px">${weatherLine.startsWith("Pas de pluie") ? "☀️" : "☔"} ${escapeHtml(weatherLine)}</p>` : ""}
     ${nutri ? `<p style="background:#f0f7f4;border-radius:10px;padding:12px 14px"><b>${escapeHtml(copy.nutriLabel)}</b> ${escapeHtml(nutri)}</p>` : ""}
