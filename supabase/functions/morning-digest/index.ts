@@ -105,19 +105,19 @@ function lineTarget(l: any, disc: string, r: Refs): string {
   const e = l.mode === "exact" ? l.exact : null;
   if (e) {
     const tol = Number(e.tol) || 0;
-    if (e.kind === "pace") { const c = (Number(e.m) || 0) * 60 + (Number(e.s) || 0); return tol ? `${mmss(c - tol)} à ${mmss(c + tol)}/km` : `${mmss(c)}/km`; }
-    if (e.kind === "power") return tol ? `${Number(e.w) - tol} à ${Number(e.w) + tol} W` : `${e.w} W`;
-    if (e.kind === "hr") return `${e.lo} à ${e.hi || e.lo} bpm`;
-    if (e.kind === "speed") return `${e.kmh} km/h`;
-    if (e.kind === "rpe") return `effort ${e.rpe}/10`;
+    if (e.kind === "pace") { const c = (Number(e.m) || 0) * 60 + (Number(e.s) || 0); return tol ? `entre ${mmss(c - tol)} et ${mmss(c + tol)}/km` : `à ${mmss(c)}/km`; }
+    if (e.kind === "power") return tol ? `entre ${Number(e.w) - tol} et ${Number(e.w) + tol} W` : `à ${e.w} W`;
+    if (e.kind === "hr") return `entre ${e.lo} et ${e.hi || e.lo} bpm`;
+    if (e.kind === "speed") return `à ${e.kmh} km/h`;
+    if (e.kind === "rpe") return `à un effort de ${e.rpe}/10`;
     return "";
   }
   if (l.mode === "zone" && Number(l.pct) > 0) {
     const pct = Number(l.pct), tol = Number(l.pctTol) || 0, lo = pct - tol, hi = pct + tol;
     const vma = Number(r.vma) || 0, ftp = Number(r.ftp) || 0, fcmax = Number(r.fc_max) || 0;
-    if (l.model === "vma" && vma && disc === "run") return `${mmss(3600 / (vma * hi / 100))} à ${mmss(3600 / (vma * lo / 100))}/km`;
-    if (l.model === "ftp" && ftp) return `${Math.round(ftp * lo / 100)} à ${Math.round(ftp * hi / 100)} W`;
-    if (l.model === "fc" && fcmax) return `${Math.round(hrAt(lo, fcmax, r.fc_repos))} à ${Math.round(hrAt(hi, fcmax, r.fc_repos))} bpm`;
+    if (l.model === "vma" && vma && disc === "run") return `entre ${mmss(3600 / (vma * hi / 100))} et ${mmss(3600 / (vma * lo / 100))}/km`;
+    if (l.model === "ftp" && ftp) return `entre ${Math.round(ftp * lo / 100)} et ${Math.round(ftp * hi / 100)} W`;
+    if (l.model === "fc" && fcmax) return `entre ${Math.round(hrAt(lo, fcmax, r.fc_repos))} et ${Math.round(hrAt(hi, fcmax, r.fc_repos))} bpm`;
   }
   return "";
 }
@@ -136,9 +136,15 @@ function stepsFor(s: any, r: Refs): string[] {
   // deno-lint-ignore no-explicit-any
   for (const b of (Array.isArray(s.blocks) ? s.blocks : []) as any[]) {
     // deno-lint-ignore no-explicit-any
+    let prev = "";
+    // deno-lint-ignore no-explicit-any
     const parts = (b.lines || []).map((l: any) => {
       const tgt = lineTarget(l, s.disc, r), note = String(l.note || "").trim();
-      return [`${STEP_LABEL[l.type] || "Bloc"} ${lineDur(l)}`.trim(), tgt ? `à ${tgt}`.replace("à trot libre", "en trot libre") : "", note ? `(${note})` : ""].filter(Boolean).join(" ");
+      const label = l.type === prev ? lineDur(l) : `${STEP_LABEL[l.type] || "Bloc"} ${lineDur(l)}`.trim();   // pas deux fois « Échauffement »
+      prev = l.type;
+      // une ligne avec une consigne (gammes, éducatifs…) se lit par sa consigne, sans cible chiffrée
+      const t = note && l.type !== "exo" ? "" : tgt === "trot libre" ? "en trot libre" : tgt;
+      return [label, t, note ? (t ? `(${note})` : `: ${note}`) : ""].filter(Boolean).join(" ");
     }).filter(Boolean);
     if (!parts.length) continue;
     const n = Number(b.series) || 1;
