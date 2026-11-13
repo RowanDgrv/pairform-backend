@@ -7,7 +7,7 @@
 //  Écritures : scheduled_sessions (format du constructeur), journalisées dans
 //  assistant_writes avec l'image avant/après.
 // =============================================================================
-import { effortPct, zoneFromPct, linePct } from "./intensity.ts";
+import { linePct, sessionLoad } from "./intensity.ts";
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { logWrite, writeQuotaExceeded } from "./assistant.ts";
 
@@ -110,7 +110,7 @@ export async function programSession(sb: SupabaseClient, coachId: string, a: Rec
   if (await writeQuotaExceeded(sb, coachId)) return "Trop d'écritures récentes : réessaie dans quelques minutes.";
 
   const { data: refs } = await sb.from("athlete_profiles").select("vma, seuil_run, ftp, pma, fc_max, fc_repos").eq("user_id", found.ath.id).maybeSingle();
-  const blocks: Record<string, unknown>[] = []; let totMin = 0, tss = 0, maxPct = 0;
+  const blocks: Record<string, unknown>[] = []; let totMin = 0, tss = 0;
   for (const b of blocsIn) {
     const series = Math.max(1, Math.min(40, Math.round(Number(b.repetitions) || 1)));
     const lines: Record<string, unknown>[] = [];
@@ -118,7 +118,6 @@ export async function programSession(sb: SupabaseClient, coachId: string, a: Rec
       const r = toLine(l, disc, refs ?? {});
       if (typeof r === "string") return r;
       lines.push(r.line); totMin += r.min * series; tss += (r.min * series / 60) * r.ifac * r.ifac * 100;
-      maxPct = Math.max(maxPct, Number(r.line.pct) || 0);
     }
     if (!lines.length) return "Un bloc n'a aucune ligne.";
     // bid/lid : identifiants attendus par l'éditeur de séance de l'app (sans
@@ -127,9 +126,9 @@ export async function programSession(sb: SupabaseClient, coachId: string, a: Rec
     lines.forEach((ln, li) => { ln.lid = `la${bi}_${li}_${Date.now().toString(36)}`; });
     blocks.push({ bid: `ba${bi}_${Date.now().toString(36)}`, series, title: String(b.titre || "").slice(0, 60), lines });
   }
-  // zone = la partie la plus dure, allures exactes comprises (avant : ignorées, un 5 × 3' à 3:10 sortait en Z2)
-  const eff = effortPct(blocks, disc, refs ?? {});
-  const zone = zoneFromPct(Math.max(maxPct, eff ?? 0));
+  // durée, charge et zone : calcul unique rapporté au seuil de l'athlète (13/11/2026)
+  const load = sessionLoad(blocks, disc, refs ?? {});
+  const zone = load.zone; totMin = load.min; tss = load.tss;
   const row = { athlete_id: found.ath.id, created_by: coachId, date, disc, title: String(a.titre || "Séance").slice(0, 100),
     dur: Math.round(totMin), dist: 0, tss: Math.round(tss), zone, blocks, coach_note: a.note_coach ? String(a.note_coach).slice(0, 500) : null,
     // consignes nutrition (0097) : seulement si le coach en donne
