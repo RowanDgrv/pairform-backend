@@ -109,12 +109,23 @@ Deno.serve(async (req) => {
       .eq("id", user.id)
       .single();
 
+    // Mentions légales en bas de chaque facture (13/11/2026) : posées sur le client Stripe
+    // (invoice_settings.footer), le réglage « Bas de page par défaut » du Dashboard refusant
+    // l'enregistrement. Reprises sur toutes ses factures d'abonnement.
+    const FOOTER = "Rowan Degraeve EI (Sillance) · SIRET 108 626 847 00017 · 2 allée Louise Bourgeois, Bât. B16, 31320 Auzeville-Tolosane · contact@sillance.app\n" +
+      "TVA non applicable, art. 293 B du CGI.\n" +
+      "Paiement à réception de la facture. En cas de retard de paiement : pénalités au taux de 3 fois le taux d'intérêt légal et indemnité forfaitaire de 40 € pour frais de recouvrement (art. L441-10 du Code de commerce). Pas d'escompte pour paiement anticipé.";
     let customerId = profile?.stripe_customer_id ?? undefined;
+    if (customerId) {
+      // client déjà créé avant ce réglage : on met son bas de page à jour (sans bloquer le paiement)
+      try { await stripe.customers.update(customerId, { invoice_settings: { footer: FOOTER } }); } catch (e) { console.warn("footer client :", e); }
+    }
     if (!customerId) {
       const customer = await stripe.customers.create({
         email: profile?.email ?? user.email,
         name: profile?.full_name ?? undefined,
         metadata: { supabase_user_id: user.id },
+        invoice_settings: { footer: FOOTER },
       });
       customerId = customer.id;
       await supabase.from("profiles")
