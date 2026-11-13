@@ -273,7 +273,7 @@ Deno.serve(async (req) => {
 
     const { data: prefs, error: pErr } = await supabase
       .from("notification_prefs")
-      .select("user_id, send_hour, send_minute, tz, channel, last_sent_on")
+      .select("user_id, send_hour, send_minute, tz, channel, last_sent_on, eve_enabled")
       .neq("channel", "none");
     if (pErr) throw pErr;
 
@@ -281,6 +281,8 @@ Deno.serve(async (req) => {
     for (const p of prefs ?? []) {
       const now = localNow(p.tz || "Europe/Paris");
       const inWindow = now.h === p.send_hour && now.m >= p.send_minute && now.m < p.send_minute + 15;
+      // un seul rappel au choix de l'athlète (13/11/2026) : la veille au soir OU le matin même, jamais les deux
+      if ((p as { eve_enabled?: boolean }).eve_enabled) { skipped++; continue; }
       if (!inWindow || p.last_sent_on === now.day) { skipped++; continue; }
 
       // séances planifiées AUJOURD'HUI (heure locale de l'athlète)
