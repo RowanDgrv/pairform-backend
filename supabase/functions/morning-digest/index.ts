@@ -17,7 +17,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import * as webpush from "jsr:@negrel/webpush@0.3.0";
 import { corsHeaders } from "../_shared/cors.ts";
 import { sendEmail } from "../_shared/email.ts";
-import { runKind, effortPct, type Refs } from "../_shared/intensity.ts";
+import { runKind, effortPct, isFreeRecovery, hrAt, type Refs } from "../_shared/intensity.ts";
 import { sendFcmPush } from "../_shared/fcm.ts";
 import { sendApnsPush } from "../_shared/apns.ts";
 
@@ -83,6 +83,70 @@ async function lastPosition(sb: any, uid: string): Promise<[number, number] | nu
 // 10/11/2026 : on renvoie aussi la plage horaire de la pluie (première et
 // dernière heure pluvieuse entre 7 h et 20 h) pour l'annoncer dans le mail :
 // « La météo annonce de la pluie entre 16 h et 19 h ».
+/* Météo du jour (13/11/2026) : pluie éventuelle + températures, pour une ligne toujours présente
+   quand l'athlète a donné sa position ou sa ville (et plus seulement quand il pleut). */
+async function dayWeather(lat: number, lon: number, day: string): Promise<{ rain: { from: number; to: number } | null; tmin: number | null; tmax: number | null } | null> {
+  try {
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=temperature_2m_min,temperature_2m_max&timezone=Europe%2FParis&start_date=${day}&end_date=${day}`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(3000) });
+    const j = res.ok ? await res.json() : null;
+    const tmin = j?.daily?.temperature_2m_min?.[0], tmax = j?.daily?.temperature_2m_max?.[0];
+    return { rain: await rainWindow(lat, lon, day), tmin: tmin == null ? null : Math.round(tmin), tmax: tmax == null ? null : Math.round(tmax) };
+  } catch { return null; }
+}
+
+/* Déroulé de la séance (13/11/2026) : chaque bloc en clair avec ses allures, watts ou FC calculés
+   pour l'athlète, et les consignes du coach par ligne. */
+const STEP_LABEL: Record<string, string> = { warmup: "Échauffement", exo: "Effort", contre: "Contre-effort", recov: "Récup", cooldown: "Retour au calme", educatif: "Éducatifs" };
+const mmss = (sec: number) => `${Math.floor(sec / 60)}:${String(Math.round(sec % 60)).padStart(2, "0")}`;
+// deno-lint-ignore no-explicit-any
+function lineTarget(l: any, disc: string, r: Refs): string {
+  if (isFreeRecovery(l)) return "trot libre";
+  const e = l.mode === "exact" ? l.exact : null;
+  if (e) {
+    const tol = Number(e.tol) || 0;
+    if (e.kind === "pace") { const c = (Number(e.m) || 0) * 60 + (Number(e.s) || 0); return tol ? `${mmss(c - tol)} à ${mmss(c + tol)}/km` : `${mmss(c)}/km`; }
+    if (e.kind === "power") return tol ? `${Number(e.w) - tol} à ${Number(e.w) + tol} W` : `${e.w} W`;
+    if (e.kind === "hr") return `${e.lo} à ${e.hi || e.lo} bpm`;
+    if (e.kind === "speed") return `${e.kmh} km/h`;
+    if (e.kind === "rpe") return `effort ${e.rpe}/10`;
+    return "";
+  }
+  if (l.mode === "zone" && Number(l.pct) > 0) {
+    const pct = Number(l.pct), tol = Number(l.pctTol) || 0, lo = pct - tol, hi = pct + tol;
+    const vma = Number(r.vma) || 0, ftp = Number(r.ftp) || 0, fcmax = Number(r.fc_max) || 0;
+    if (l.model === "vma" && vma && disc === "run") return `${mmss(3600 / (vma * hi / 100))} à ${mmss(3600 / (vma * lo / 100))}/km`;
+    if (l.model === "ftp" && ftp) return `${Math.round(ftp * lo / 100)} à ${Math.round(ftp * hi / 100)} W`;
+    if (l.model === "fc" && fcmax) return `${Math.round(hrAt(lo, fcmax, r.fc_repos))} à ${Math.round(hrAt(hi, fcmax, r.fc_repos))} bpm`;
+  }
+  return "";
+}
+// deno-lint-ignore no-explicit-any
+function lineDur(l: any): string {
+  if (l.metric === "dist") { const d = Number(l.dist) || 0; return d >= 1000 ? `${+(d / 1000).toFixed(2)} km` : `${d} m`; }
+  if (l.metric === "reps") return `${l.reps || 0} répétitions`;
+  const t = (Number(l.dur?.h) || 0) * 3600 + (Number(l.dur?.m) || 0) * 60 + (Number(l.dur?.s) || 0);
+  if (!t) return "";
+  const m = Math.floor(t / 60), sec = t % 60;
+  return t >= 3600 ? `${Math.floor(t / 3600)} h ${String(m % 60).padStart(2, "0")}` : sec ? `${m}'${String(sec).padStart(2, "0")}` : `${m}'`;
+}
+// deno-lint-ignore no-explicit-any
+function stepsFor(s: any, r: Refs): string[] {
+  const out: string[] = [];
+  // deno-lint-ignore no-explicit-any
+  for (const b of (Array.isArray(s.blocks) ? s.blocks : []) as any[]) {
+    // deno-lint-ignore no-explicit-any
+    const parts = (b.lines || []).map((l: any) => {
+      const tgt = lineTarget(l, s.disc, r), note = String(l.note || "").trim();
+      return [`${STEP_LABEL[l.type] || "Bloc"} ${lineDur(l)}`.trim(), tgt ? `à ${tgt}`.replace("à trot libre", "en trot libre") : "", note ? `(${note})` : ""].filter(Boolean).join(" ");
+    }).filter(Boolean);
+    if (!parts.length) continue;
+    const n = Number(b.series) || 1;
+    out.push(n > 1 ? `${n} × [ ${parts.join(", puis ")} ]` : parts.join(", puis "));
+  }
+  return out;
+}
+
 async function rainWindow(lat: number, lon: number, day: string): Promise<{ from: number; to: number } | null> {
   try {
     const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
@@ -247,10 +311,13 @@ Deno.serve(async (req) => {
       let weatherLine = "";
       if (!gear.some((g) => g.startsWith("veste de pluie")) && hasOutdoor(sessions as Session[])) {
         const pos = await lastPosition(supabase, p.user_id);
-        const rain = pos ? await rainWindow(pos[0], pos[1], now.day) : null;
-        if (rain) {
+        const w = pos ? await dayWeather(pos[0], pos[1], now.day) : null;
+        const temp = w && w.tmin != null && w.tmax != null ? ` Entre ${w.tmin} et ${w.tmax} °C dans la journée.` : "";
+        if (w?.rain) {
           gear.push("veste de pluie (pluie prévue)");
-          weatherLine = `La météo annonce de la pluie entre ${rain.from} h et ${rain.to} h : prévois ta veste de pluie.`;
+          weatherLine = `La météo annonce de la pluie entre ${w.rain.from} h et ${w.rain.to} h : prévois ta veste de pluie.${temp}`;
+        } else if (w) {
+          weatherLine = `Pas de pluie prévue aujourd'hui.${temp}`;
         }
       }
       // Nutrition (12/11/2026) : uniquement les consignes écrites (ou validées) par le coach, et seulement
@@ -281,11 +348,14 @@ Deno.serve(async (req) => {
         coachFirst = c?.first_name || (c?.full_name || "").split(" ")[0] || null;
       }
       const firstName = me?.first_name || (me?.full_name || "").split(" ")[0] || null;
+      let steps: string[] = [];
       // intensité réelle de chaque séance (allures / watts / FC demandés vs références de l'athlète)
       {
         const { data: rf } = await supabase.from("athlete_profiles").select("vma, seuil_run, ftp, pma, fc_max, fc_repos").eq("user_id", p.user_id).maybeSingle();
         // deno-lint-ignore no-explicit-any
         for (const s of sessions as any[]) s.effort = effortPct(s.blocks, s.disc, rf ?? {});
+        // deno-lint-ignore no-explicit-any
+        steps = (sessions as any[]).flatMap((s) => stepsFor(s, rf ?? {}));
       }
       const copy = morningCopy(sessions as Session[], { firstName, coachFirstName: coachFirst, day: now.day, userId: p.user_id });
       const title = copy.subject;
@@ -308,7 +378,7 @@ Deno.serve(async (req) => {
             return await sendEmail({
               to: me.email,
               subject: title,
-              html: digestHtml(copy, lines, gear, nutri, notes, coachFirst, weatherLine),
+              html: digestHtml(copy, lines, gear, nutri, notes, coachFirst, weatherLine, steps),
             });
           })(),
           (async () => {
@@ -374,14 +444,15 @@ Deno.serve(async (req) => {
   }
 });
 
-function digestHtml(copy: ReturnType<typeof morningCopy>, lines: string[], gear: string[], nutri: string, notes: string[] = [], coach: string | null = null, weatherLine = ""): string {
+function digestHtml(copy: ReturnType<typeof morningCopy>, lines: string[], gear: string[], nutri: string, notes: string[] = [], coach: string | null = null, weatherLine = "", steps: string[] = []): string {
   return `
   <div style="font-family:system-ui,Segoe UI,sans-serif;max-width:520px;margin:0 auto;color:#0f1720;font-size:16px;line-height:1.6">
     <p>${escapeHtml(copy.greeting)}</p>
     <p>${copy.weekdayLine ? escapeHtml(copy.weekdayLine) + " " : ""}${escapeHtml(copy.intro)}</p>
     <ul style="line-height:1.7;padding-left:20px">${lines.map((l) => `<li>${escapeHtml(l)}</li>`).join("")}</ul>
+    ${steps.length ? `<p style="margin-bottom:4px"><b>Le déroulé</b></p><ol style="line-height:1.7;padding-left:22px;margin-top:4px">${steps.map((x) => `<li>${escapeHtml(x)}</li>`).join("")}</ol>` : ""}
     <p><b>${escapeHtml(copy.gearLabel)}</b> ${gear.map(escapeHtml).join(", ")}</p>
-    ${weatherLine ? `<p style="background:#eef4fb;border-radius:10px;padding:12px 14px">☔ ${escapeHtml(weatherLine)}</p>` : ""}
+    ${weatherLine ? `<p style="background:#eef4fb;border-radius:10px;padding:12px 14px">${weatherLine.startsWith("Pas de pluie") ? "☀️" : "☔"} ${escapeHtml(weatherLine)}</p>` : ""}
     ${nutri ? `<p style="background:#f0f7f4;border-radius:10px;padding:12px 14px"><b>${escapeHtml(copy.nutriLabel)}</b> ${escapeHtml(nutri)}</p>` : ""}
     ${notes.length
       ? `<p style="border-left:3px solid #0B7285;padding:4px 0 4px 14px"><span style="font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#0B7285;font-weight:700">Le mot de ${escapeHtml(coach || "ton coach")}</span><br>${notes.map(escapeHtml).join("<br>")}</p><p>${escapeHtml(copy.signature)}</p>`
