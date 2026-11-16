@@ -57,6 +57,12 @@ Deno.serve(async (req) => {
     const offer = offers?.[0];
     if (!offer || offer.active === false) return json({ error: "Offre de coaching indisponible" }, 400);
 
+    // Anti double abonnement (16/11/2026) : suivi déjà payé auprès de ce coach.
+    const { data: currentCoaching } = await supabase.from("coaching_subscriptions")
+      .select("id").eq("coach_id", coach_id).eq("athlete_id", athleteId)
+      .in("status", ["trialing", "active", "past_due"]).limit(1);
+    if (currentCoaching?.length) return json({ error: "Un abonnement est déjà en cours avec ce coach." }, 409);
+
     // --- customer Stripe de l'athlète (le payeur) ----------------------------
     const { data: payer } = await supabase
       .from("profiles")

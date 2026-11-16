@@ -63,6 +63,15 @@ Deno.serve(async (req) => {
       await supabase.from("profiles").update({ stripe_customer_id: customerId }).eq("id", user.id);
     }
 
+    // Anti double abonnement (16/11/2026) : Premium Club déjà en cours → portail Stripe.
+    const { data: prem } = await supabase.from("clubs").select("premium_until").eq("id", club_id).single();
+    if (prem?.premium_until && new Date(prem.premium_until).getTime() > Date.now()) {
+      const portal = await stripe.billingPortal.sessions.create({
+        customer: customerId!, return_url: `${APP_URL}/sillance-app.html`,
+      });
+      return json({ url: portal.url, already_subscribed: true });
+    }
+
     const line_item = CLUB_PREMIUM_PRICE_ID
       ? { price: CLUB_PREMIUM_PRICE_ID, quantity: 1 }
       : {

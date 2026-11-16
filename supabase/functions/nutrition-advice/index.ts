@@ -80,6 +80,9 @@ Deno.serve(async (req) => {
     }
     const prompt = describe(s, refs) + (weight ? `\nPoids de l'athlète : ${Math.round(weight)} kg` : "\nPoids de l'athlète : inconnu");
     let out: Record<string, unknown>, model: string;
+    // Plafond quotidien d'appels IA par coach (0100) : le cache ne compte pas.
+    { const { data: allowed, error: capErr } = await sb.rpc("ai_usage_bump", { uid: uid, max_per_day: Number(Deno.env.get("AI_DAILY_CAP") ?? "150") });
+      if (!capErr && allowed === false) return json({ error: "Limite quotidienne d'analyses IA atteinte. Réessaie demain." }, 429); }
     try { ({ value: out, model } = await generateJson(SYSTEM, prompt, 600)); }
     catch (e) { console.error("[nutrition-advice] IA", e instanceof AiError ? JSON.stringify(e.attempts) : e); return json({ error: "provider_error" }, 502); }
     const clean = (x: unknown) => String(x ?? "").replace(/[<>]/g, "").trim().slice(0, 400);

@@ -133,6 +133,19 @@ Deno.serve(async (req) => {
         .eq("id", user.id);
     }
 
+    // Anti double abonnement (16/11/2026) : un abonnement du même type déjà en
+    // cours → on renvoie vers le portail Stripe (changer de palier, de carte,
+    // résilier) au lieu d'ouvrir un second paiement qui débiterait deux fois.
+    const { data: current } = await supabase.from("subscriptions")
+      .select("id").eq("user_id", user.id).eq("plan", plan)
+      .in("status", ["trialing", "active", "past_due"]).limit(1);
+    if (current?.length) {
+      const portal = await stripe.billingPortal.sessions.create({
+        customer: customerId!, return_url: `${APP_URL}/sillance-app.html`,
+      });
+      return json({ url: portal.url, already_subscribed: true });
+    }
+
     const subMeta: Record<string, string> = { supabase_user_id: user.id, plan };
     if (planTier != null) subMeta.tier = String(planTier);
 

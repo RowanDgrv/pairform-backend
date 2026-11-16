@@ -79,6 +79,9 @@ Deno.serve(async (req) => {
     }
 
     // --- Appel IA (Groq, Claude en repli) ---
+    // Plafond quotidien d'appels IA par coach (0100) : le cache ne compte pas.
+    { const { data: allowed, error: capErr } = await supabase.rpc("ai_usage_bump", { uid: user.id, max_per_day: Number(Deno.env.get("AI_DAILY_CAP") ?? "150") });
+      if (!capErr && allowed === false) return json({ error: "Limite quotidienne d'analyses IA atteinte. Réessaie demain." }, 429); }
     stage = "ia";
     const { summary, model } = await summarizeWeek(sessions);
 

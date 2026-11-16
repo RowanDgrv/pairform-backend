@@ -70,6 +70,12 @@ Deno.serve(async (req) => {
       .eq("club_id", club_id).eq("tier", tier).single();
     if (!offer || offer.active === false) return json({ error: "Formule indisponible" }, 400);
 
+    // Anti double abonnement (16/11/2026) : adhésion déjà en cours pour ce membre.
+    const { data: currentMembership } = await supabase.from("club_memberships")
+      .select("id").eq("club_id", club_id).eq("member_id", member_id)
+      .in("status", ["trialing", "active", "past_due"]).limit(1);
+    if (currentMembership?.length) return json({ error: "Une adhésion est déjà en cours pour ce membre." }, 409);
+
     // --- customer Stripe lié au payeur (le membre s'il a un compte) -----------
     const payerId = member.athlete_id ?? user.id;
     const { data: payer } = await supabase

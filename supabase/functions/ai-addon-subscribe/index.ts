@@ -58,6 +58,17 @@ Deno.serve(async (req) => {
         .update({ stripe_customer_id: customerId }).eq("id", user.id);
     }
 
+    // Anti double abonnement (16/11/2026) : option déjà active → portail Stripe.
+    const { data: currentAddon } = await supabase.from("ai_addons")
+      .select("id").eq("user_id", user.id)
+      .in("status", ["trialing", "active", "past_due"]).limit(1);
+    if (currentAddon?.length) {
+      const portal = await stripe.billingPortal.sessions.create({
+        customer: customerId!, return_url: `${APP_URL}/sillance-app.html`,
+      });
+      return json({ url: portal.url, already_subscribed: true });
+    }
+
     // --- ligne : Price fixe si configuré, sinon price_data dynamique ---
     const line_item = AI_PRICE_ID
       ? { price: AI_PRICE_ID, quantity: 1 }
