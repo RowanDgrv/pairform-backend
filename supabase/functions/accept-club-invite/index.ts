@@ -54,6 +54,8 @@ Deno.serve(async (req) => {
         .insert({
           club_id: invite.club_id, athlete_id: user.id, role: "member",
           display_name: profile?.full_name ?? null,
+          // origine (0104) : entré par invitation, faite par l'auteur de l'invitation
+          join_method: "invitation", added_by: invite.invited_by ?? null,
         })
         .select().single();
       if (memErr && memErr.code === "23505") {
