@@ -149,12 +149,38 @@ Deno.serve(async (req) => {
     const subMeta: Record<string, string> = { supabase_user_id: user.id, plan };
     if (planTier != null) subMeta.tier = String(planTier);
 
+    // Essai CLUB avec carte obligatoire (17/11/2026, demande Rowan) : le gérant
+    // donne sa carte pour démarrer l'essai, rien n'est débité avant la fin.
+    // Durée = ce qui reste de l'essai de SON club (clubs.created_at + trial_days,
+    // 14 j par défaut, réglable par club). Un seul essai par compte : s'il a déjà
+    // eu un abonnement club (même annulé), on facture directement.
+    let trialDays = 0;
+    if (plan === "club") {
+      const { data: club } = await supabase.from("clubs").select("created_at, trial_days")
+        .eq("owner_id", user.id).order("created_at").limit(1).maybeSingle();
+      const { data: past } = await supabase.from("subscriptions").select("id")
+        .eq("user_id", user.id).eq("plan", "club").limit(1);
+      if (club && !past?.length) {
+        const days = club.trial_days != null ? Number(club.trial_days) : 14;
+        const end = new Date(club.created_at).getTime() + days * 86400000;
+        trialDays = Math.max(0, Math.ceil((end - Date.now()) / 86400000));
+      }
+    }
+
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       customer: customerId,
       line_items: [lineItem],
       // Métadonnées récupérées par le webhook pour écrire la bonne ligne.
-      subscription_data: { metadata: subMeta },
+      subscription_data: {
+        metadata: subMeta,
+        ...(trialDays >= 1 ? {
+          trial_period_days: trialDays,
+          // pas de carte valide à la fin de l'essai → abonnement annulé, jamais d'accès gratuit prolongé
+          trial_settings: { end_behavior: { missing_payment_method: "cancel" } },
+        } : {}),
+      },
+      payment_method_collection: "always",   // carte demandée même pendant l'essai
       metadata: subMeta,
       allow_promotion_codes: true,
       // Facturation (05/11/2026) : une facture entre professionnels doit porter
