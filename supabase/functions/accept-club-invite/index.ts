@@ -56,8 +56,13 @@ Deno.serve(async (req) => {
           display_name: profile?.full_name ?? null,
         })
         .select().single();
-      if (memErr) throw memErr;
-      memberId = member.id;
+      if (memErr && memErr.code === "23505") {
+        // déjà membre (index unique 0102 ; double clic ou deux onglets) : on reprend la ligne existante
+        const { data: again } = await supabase.from("club_members").select("id")
+          .eq("club_id", invite.club_id).eq("athlete_id", user.id).maybeSingle();
+        memberId = again?.id;
+      } else if (memErr) throw memErr;
+      else memberId = member.id;
     }
 
     await supabase.from("club_invitations").update({
