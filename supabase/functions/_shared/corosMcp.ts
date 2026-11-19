@@ -467,9 +467,12 @@ export async function fetchWellness(sb: SupabaseClient, conn: any): Promise<Reco
   try {
     const { text } = await mcpCall(token, "querySleepHrv", { startDate: ymd(2), endDate: ymd(0), days: 3 });
     // "2026-09-06:  HRV Avg: 95 ms — Normal  Normal Range: 57 - 117 ms  Baseline: 87 ms"
-    const m = text.match(/(\d{4}-\d{2}-\d{2}):\s+HRV Avg:\s*(\d+)\s*ms\s*[—–-]\s*([A-Za-z ]+?)\s+Normal Range:\s*(\d+)\s*-\s*(\d+)\s*ms\s+Baseline:\s*(\d+)/);
-    if (m) {
-      wellness.hrv = { date: m[1], avgMs: +m[2], evaluation: m[3].trim(), normalLow: +m[4], normalHigh: +m[5], baselineMs: +m[6] };
+    // 19/11/2026 : COROS met désormais la date et chaque valeur sur des lignes séparées
+    // (l'ancien motif sur une ligne ne trouvait plus rien) → parseur commun, nuit la plus récente.
+    const days = parseSleepHrv(text), last = Object.keys(days).sort().pop();
+    if (last) {
+      const h = days[last] as any;
+      wellness.hrv = { date: last, avgMs: h.hrv_ms, evaluation: h.hrv_eval, normalLow: h.hrv_low, normalHigh: h.hrv_high, baselineMs: h.hrv_baseline };
     }
   } catch (e) { console.warn("coros hrv:", String(e).slice(0, 120)); }
 
@@ -487,7 +490,14 @@ export async function fetchWellness(sb: SupabaseClient, conn: any): Promise<Reco
     if (first) wellness.load = { date: first[1], comment: first[2].trim(), shortTerm: +first[3], longTerm: +first[4], ratio: +first[5] };
   } catch (e) { console.warn("coros load:", String(e).slice(0, 120)); }
 
-  const meta = { ...(conn.meta ?? {}), wellness };
+  // Historique jour par jour (0107) : sommeil, HRV de nuit, FC de repos.
+  // 1re fois : 28 jours ; ensuite les 7 derniers jours (les nuits se complètent en retard).
+  const backfilled = !!(conn.meta?.wellness_daily_since);
+  try { await syncWellnessDaily(sb, conn, token, backfilled ? 7 : 28); wellness.dailySynced = true; }
+  catch (e) { console.warn("coros wellness_daily:", String(e).slice(0, 160)); }
+
+  const meta = { ...(conn.meta ?? {}), wellness,
+    ...(wellness.dailySynced && !backfilled ? { wellness_daily_since: new Date().toISOString().slice(0, 10) } : {}) };
   await sb.from("device_connections").update({ meta }).eq("id", conn.id);
 
   // Renseigne checkins.hrv du jour SI un check-in existe déjà (ne pas en créer).
@@ -555,4 +565,80 @@ export async function pushPlannedSession(
     course,
   });
   return { ok: true, text };
+}
+
+// -----------------------------------------------------------------------------
+//  Santé jour par jour → wellness_daily (0107, 19/11/2026)
+//  Textes COROS (format vérifié sur le compte de Rowan le 19/11) :
+//   querySleepOverview : "2026-11-18\nSleep Score: 83\n...Main Sleep (asleep): 7h 4min\n
+//                         Deep Sleep Ratio: 20%\n...REM Ratio: 19%\n...Awake Time: 19 min"
+//                         (jour sans donnée : "Sleep Score: 0" + "not available yet" → ignoré)
+//   querySleepHrv      : "2026-11-18:\n  HRV Avg: 68 ms — Normal\n  Normal Range: 58 - 100 ms\n  Baseline: 79 ms"
+//                         (7 jours max par appel)
+//   queryRestingHeartRate : "2026-11-18: 52 bpm"
+//  Dates = jour du réveil, dans le fuseau COROS de l'athlète.
+// -----------------------------------------------------------------------------
+type WDay = Record<string, number | string | null>;
+export function parseSleepOverview(text: string): Record<string, WDay> {
+  const out: Record<string, WDay> = {};
+  const blocks = text.split(/\n(?=\d{4}-\d{2}-\d{2}\s*\n)/);
+  for (const b of blocks) {
+    const d = b.match(/^(\d{4}-\d{2}-\d{2})\s*\n/m); if (!d) continue;
+    if (/not available/i.test(b)) continue;
+    const score = b.match(/Sleep Score:\s*(\d+)/i);
+    const main = b.match(/Main Sleep \(asleep\):\s*(?:(\d+)h)?\s*(?:(\d+)\s*min)?/i);
+    const mins = main && (main[1] || main[2]) ? (+(main[1] || 0)) * 60 + (+(main[2] || 0)) : null;
+    if (!mins && !(score && +score[1] > 0)) continue;
+    const pct = (re: RegExp) => { const m = b.match(re); return m ? +m[1] : null; };
+    out[d[1]] = {
+      sleep_score: score && +score[1] > 0 ? +score[1] : null,
+      sleep_min: mins,
+      deep_pct: pct(/Deep Sleep Ratio:\s*(\d+)\s*%/i),
+      rem_pct: pct(/REM Ratio:\s*(\d+)\s*%/i),
+      awake_min: pct(/Awake Time:\s*(\d+)\s*min/i),
+    };
+  }
+  return out;
+}
+export function parseSleepHrv(text: string): Record<string, WDay> {
+  const out: Record<string, WDay> = {};
+  // seulement la partie « Assessment » (pas la série brute)
+  const part = text.split(/Sleep HRV Time Series/i)[0];
+  const re = /(\d{4}-\d{2}-\d{2}):\s*\n\s*HRV Avg:\s*(\d+)\s*ms\s*[—–-]\s*([^\n]+?)\s*\n\s*Normal Range:\s*(\d+)\s*-\s*(\d+)\s*ms\s*\n\s*Baseline:\s*(\d+)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(part))) out[m[1]] = { hrv_ms: +m[2], hrv_eval: m[3].trim().slice(0, 40), hrv_low: +m[4], hrv_high: +m[5], hrv_baseline: +m[6] };
+  return out;
+}
+export function parseRestingHr(text: string): Record<string, WDay> {
+  const out: Record<string, WDay> = {};
+  const re = /(\d{4}-\d{2}-\d{2}):\s*(\d+)\s*bpm/g; let m: RegExpExecArray | null;
+  while ((m = re.exec(text))) out[m[1]] = { resting_hr: +m[2] };
+  return out;
+}
+async function syncWellnessDaily(sb: SupabaseClient, conn: any, token: string, days: number): Promise<number> {
+  const merged: Record<string, WDay> = {};
+  const add = (src: Record<string, WDay>) => { for (const d in src) merged[d] = { ...(merged[d] ?? {}), ...src[d] }; };
+  add(parseSleepOverview((await mcpCall(token, "querySleepOverview", { startDate: ymd(days - 1), endDate: ymd(0) })).text));
+  for (let end = 0; end < days; end += 7) {   // HRV : 7 jours max par appel
+    const start = Math.min(days - 1, end + 6);
+    try { add(parseSleepHrv((await mcpCall(token, "querySleepHrv", { startDate: ymd(start), endDate: ymd(end) })).text)); }
+    catch (e) { console.warn("coros hrv daily:", String(e).slice(0, 120)); }
+  }
+  try { add(parseRestingHr((await mcpCall(token, "queryRestingHeartRate", { days })).text)); }
+  catch (e) { console.warn("coros rhr daily:", String(e).slice(0, 120)); }
+  const dates = Object.keys(merged); if (!dates.length) return 0;
+  // Ne jamais effacer une valeur déjà connue si un appel n'a rien renvoyé cette fois :
+  // on part de la ligne existante (un upsert en lot met à NULL les colonnes absentes).
+  const { data: prev } = await sb.from("wellness_daily").select("*")
+    .eq("athlete_id", conn.user_id).eq("source", "coros").in("date", dates);
+  const COLS = ["sleep_score", "sleep_min", "deep_pct", "rem_pct", "awake_min", "hrv_ms", "hrv_low", "hrv_high", "hrv_baseline", "hrv_eval", "resting_hr"];
+  const rows = dates.map((date) => {
+    const old = (prev ?? []).find((r: any) => r.date === date) ?? {};
+    const row: Record<string, unknown> = { athlete_id: conn.user_id, date, source: "coros", updated_at: new Date().toISOString() };
+    for (const c of COLS) row[c] = merged[date][c] ?? (old as any)[c] ?? null;
+    return row;
+  });
+  const { error } = await sb.from("wellness_daily").upsert(rows, { onConflict: "athlete_id,date,source" });
+  if (error) throw new Error(error.message);
+  return rows.length;
 }
