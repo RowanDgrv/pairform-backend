@@ -100,3 +100,8 @@ verify_jwt = false
 
 [functions.coach-missed-alert]
 verify_jwt = false
+
+# Chien de garde des tâches auto (0109) : appelé par pg_cron et par la routine cloud
+# SANS secret ni JWT, exprès (il ne doit pas tomber si le secret cron se désynchronise).
+[functions.cron-watchdog]
+verify_jwt = false
