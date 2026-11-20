@@ -5,7 +5,7 @@
 //  désynchronisé, le chien de garde ne doit pas tomber avec les tâches qu'il
 //  surveille. Un appel anonyme ne peut rien faire d'autre que relancer le
 //  contrôle : les mails d'alerte sont limités (même liste de problèmes → au plus
-//  un mail toutes les 6 h) et la réponse ne contient que des noms de tâches et
+//  un mail par 24 h) et la réponse ne contient que des noms de tâches et
 //  des codes HTTP.
 //  Mail aux admins (secret ADMIN_EMAILS) quand cron_health() trouve un problème,
 //  puis un mail « rétabli » quand tout redevient normal.
@@ -18,7 +18,7 @@ const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 const esc = (s: unknown) => String(s ?? "").replace(/[&<>"']/g, (c) => (({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }) as Record<string, string>)[c]);
 const admins = () => (Deno.env.get("ADMIN_EMAILS") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-const REALERT_MS = 6 * 3600 * 1000;
+const REALERT_MS = 24 * 3600 * 1000;
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -40,7 +40,7 @@ Deno.serve(async (req) => {
           <h2 style="margin:0 0 8px">Sillance : ${problems.length} tâche${problems.length > 1 ? "s" : ""} automatique${problems.length > 1 ? "s" : ""} en panne</h2>
           <p>Le chien de garde a trouvé :</p>
           <ul>${problems.map((p) => `<li>${esc(p)}</li>`).join("")}</ul>
-          <p style="color:#5b6670;font-size:13px">Contrôle : cron_health() en base. Tant que rien ne change, ce mail revient au plus toutes les 6 h.</p></div>`;
+          <p style="color:#5b6670;font-size:13px">Contrôle : cron_health() en base. Tant que rien ne change, ce mail revient au plus une fois par 24 h.</p></div>`;
         let ok = to.length > 0;
         for (const a of to) ok = (await sendEmail({ to: a, subject: `⚠ Sillance : tâches automatiques en panne (${problems.length})`, html })) && ok;
         if (ok) {
