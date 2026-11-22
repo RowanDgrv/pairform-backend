@@ -16,6 +16,7 @@ export interface FitPoint {
   time: number | null; lat: number | null; lon: number | null; alt: number | null;
   distM: number | null; hr: number; cad: number; pw: number; spdMs: number | null;
   stepLen: number | null;
+  temp?: number | null;
 }
 export interface FitLap {
   start: number; end: number; durS?: number; distM?: number;
@@ -34,8 +35,12 @@ const FIT_BASE_SIZE: Record<number, number> = {
 // seulement sur montres avec capteur RD (Coros/Garmin) — jamais inventé si absent.
 const REC_FIELDS: Record<number, string> = {
   253: "timestamp", 0: "lat", 1: "lon", 2: "alt", 78: "ealt", 3: "hr", 4: "cad",
-  5: "dist", 6: "spd", 73: "espd", 7: "pw", 85: "steplen",
+  5: "dist", 6: "spd", 73: "espd", 7: "pw", 85: "steplen", 13: "temp",
 };
+// 13 = temperature (sint8, °C), capteur de la montre ; 127 = valeur invalide (22/11/2026).
+// Message "session" (global msg 18) : 57 = avg_temperature (sint8, °C). COROS ne met la
+// température que là (pas dans les points) — vérifié sur un .fit COROS le 22/11/2026.
+const SESSION_FIELDS: Record<number, string> = { 57: "avgTemp" };
 // Message "lap" (global msg 19) : timestamp (253) marque la FIN du lap.
 const LAP_FIELDS: Record<number, string> = {
   253: "timestamp", 7: "elapsedTime", 8: "timerTime", 9: "totalDist",
@@ -44,7 +49,8 @@ const LAP_FIELDS: Record<number, string> = {
 
 /** Décode un buffer .FIT brut → points « raw » + laps « lapsRaw », au même
  *  format que ce que renvoie l'API Strava une fois normalisé côté serveur. */
-export function parseFitArrayBuffer(buf: ArrayBuffer): { points: FitPoint[]; laps: FitLap[] } {
+export function parseFitArrayBuffer(buf: ArrayBuffer): { points: FitPoint[]; laps: FitLap[]; avgTemp: number | null } {
+  let avgTemp: number | null = null;
   const view = new DataView(buf);
   const bytes = new Uint8Array(buf);
   if (bytes.length < 14 || String.fromCharCode(bytes[8], bytes[9], bytes[10], bytes[11]) !== ".FIT") {
@@ -137,7 +143,7 @@ export function parseFitArrayBuffer(buf: ArrayBuffer): { points: FitPoint[]; lap
 
     const rec: Record<string, number | null> = {};
     for (const f of def.fields) {
-      const name = def.globalMsgNum === 20 ? REC_FIELDS[f.num] : def.globalMsgNum === 19 ? LAP_FIELDS[f.num] : null;
+      const name = def.globalMsgNum === 20 ? REC_FIELDS[f.num] : def.globalMsgNum === 19 ? LAP_FIELDS[f.num] : def.globalMsgNum === 18 ? SESSION_FIELDS[f.num] : null;
       if (name) rec[name] = readField(f.size, f.type, def.le);
       else offset += f.size; // champ non reconnu : on saute sans décoder
     }
@@ -155,6 +161,7 @@ export function parseFitArrayBuffer(buf: ArrayBuffer): { points: FitPoint[]; lap
     if (rec.lon === INVALID_LAT || rec.lon === -INVALID_LAT - 1) rec.lon = null;
     if (rec.steplen === INVALID16) rec.steplen = null;
 
+    if (def.globalMsgNum === 18 && rec.avgTemp != null && rec.avgTemp !== 127 && rec.avgTemp > -60 && rec.avgTemp < 70) avgTemp = rec.avgTemp;
     if (def.globalMsgNum === 20) {
       if (rec.timestamp != null) lastTimestamp = rec.timestamp;
       const ts = rec.timestamp != null ? rec.timestamp : lastTimestamp;
@@ -172,6 +179,7 @@ export function parseFitArrayBuffer(buf: ArrayBuffer): { points: FitPoint[]; lap
         pw: (rec.pw != null && rec.pw < 65535) ? rec.pw : 0,
         spdMs: (spd != null && spd < 100) ? spd : null,
         stepLen: rec.steplen != null ? rec.steplen / 10000 : null,
+        temp: (rec.temp != null && rec.temp !== 127 && rec.temp > -60 && rec.temp < 70) ? rec.temp : null,
       });
     }
     if (def.globalMsgNum === 19) {
@@ -209,5 +217,5 @@ export function parseFitArrayBuffer(buf: ArrayBuffer): { points: FitPoint[]; lap
     if (start < raw.length) laps.push({ start, end: raw.length });
   }
 
-  return { points: raw, laps };
+  return { points: raw, laps, avgTemp };
 }

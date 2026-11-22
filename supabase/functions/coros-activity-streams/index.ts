@@ -60,7 +60,7 @@ Deno.serve(async (req) => {
     if (!(await canAccess(sb, user.id, act.user_id))) return json({ error: "Activité introuvable" }, 404);
     if (act.provider !== "coros") return json({ error: "Détail seconde-par-seconde disponible uniquement pour COROS via cette route" }, 400);
 
-    if (act.points) return json({ points: act.points, laps: act.laps ?? [] });
+    if (act.points) return json({ points: act.points, laps: act.laps ?? [], avgTemp: act.raw?.avg_temp ?? null });
 
     let fitUrl: string | null = act.raw?.fit_url ?? null;
     const labelId = act.provider_activity_id as string;
@@ -93,11 +93,12 @@ Deno.serve(async (req) => {
       fitUrl = retryUrl;
     }
 
-    const { points, laps } = parsed;
+    const { points, laps, avgTemp } = parsed;
+    // avg_temp : température moyenne du capteur de la montre (session FIT), null si absente (22/11/2026)
     await sb.from("external_activities")
-      .update({ points, laps, raw: { ...act.raw, fit_url: fitUrl } })
+      .update({ points, laps, raw: { ...act.raw, fit_url: fitUrl, avg_temp: avgTemp } })
       .eq("id", act.id);
-    return json({ points, laps });
+    return json({ points, laps, avgTemp });
   } catch (e) {
     console.error(e);
     return json({ error: "Erreur serveur" }, 500);
