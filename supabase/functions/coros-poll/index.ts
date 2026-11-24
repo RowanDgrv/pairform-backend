@@ -62,9 +62,18 @@ Deno.serve(async (req) => {
         await resolveActivityDuplicates(sb, conn.user_id, since);
       } catch (e) { console.error("dedup:", conn.user_id, e); }
       ok++;
+      if (row.meta?.sync_error) {
+        await sb.from("device_connections").update({ meta: { ...row.meta, sync_error: null } }).eq("id", row.id);
+      }
     } catch (e) {
       failed++;
-      console.error("coros-poll", conn.user_id, String(e).slice(0, 200));
+      const msg = String(e).slice(0, 300);
+      console.error("coros-poll", conn.user_id, msg);
+      // Garde la dernière erreur sur la connexion (lisible par le chien de garde et l'outil de gestion).
+      // Le message COROS ne contient jamais le jeton : seulement le code HTTP et la réponse d'erreur OAuth.
+      await sb.from("device_connections")
+        .update({ meta: { ...(row.meta ?? {}), sync_error: { at: new Date().toISOString(), msg } } })
+        .eq("id", row.id);
     }
   }
   return json({ ok, imported, failed, total: conns?.length ?? 0 });

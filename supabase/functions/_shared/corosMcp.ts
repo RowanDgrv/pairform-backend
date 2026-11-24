@@ -162,7 +162,12 @@ export async function exchangeCode(
 export async function validToken(sb: SupabaseClient, conn: any): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
   const exp = conn.expires_at ? Math.floor(new Date(conn.expires_at).getTime() / 1000) : 0;
-  if (conn.access_token && exp - 120 > now) return conn.access_token;
+  // Renouvellement ANTICIPÉ : COROS refuse le refresh_token (400 invalid_grant) une fois les
+  // 30 jours du jeton d'accès écoulés (constaté le 24/11/2026 sur 2 comptes, morts pile à
+  // l'expiration). On renouvelle donc dès qu'il reste moins de 7 jours, tant que c'est possible.
+  const REFRESH_AHEAD_S = 7 * 24 * 3600;
+  if (conn.access_token && exp - REFRESH_AHEAD_S > now) return conn.access_token;
+  if (conn.access_token && exp - 120 > now && !conn.refresh_token) return conn.access_token;
   if (!conn.refresh_token) throw new Error("COROS: pas de refresh_token — reconnexion requise");
 
   const redirectUri = conn.meta?.redirect_uri
@@ -179,7 +184,13 @@ export async function validToken(sb: SupabaseClient, conn: any): Promise<string>
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body,
   });
-  if (!res.ok) throw new Error(`COROS refresh: ${res.status} ${await res.text()}`);
+  if (!res.ok) {
+    const err = `COROS refresh: ${res.status} ${await res.text()}`;
+    // Renouvellement anticipé raté (réseau, appel concurrent…) : le jeton actuel est encore
+    // valable, on continue avec lui ; on retentera au prochain passage (toutes les ~2 h).
+    if (conn.access_token && exp - 120 > now) { console.warn(err, "→ jeton actuel conservé"); return conn.access_token; }
+    throw new Error(err);
+  }
   const t: TokenResp = await res.json();
   const expiresAt = t.expires_in ? new Date((now + Number(t.expires_in)) * 1000).toISOString() : null;
   await sb.from("device_connections").update({
