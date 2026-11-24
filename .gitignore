@@ -9,3 +9,10 @@ supabase/.temp/
 deno.lock
 deno1.lock
 content/library/source-extract.txt
+
+# SECURITY : jamais de secrets versionnés (garder .env.example)
+.env.*
+!.env.example
+*.pem
+*.key
+serviceAccount*.json
